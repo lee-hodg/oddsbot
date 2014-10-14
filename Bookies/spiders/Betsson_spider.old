@@ -1,0 +1,190 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+
+class BetssonSpider(Spider):
+
+    download_delay = 0.4 # spider-specific delay
+                       # scrapy will mult by 0.5 and 1.5 to get low/upper
+                       # range for random delay.
+                       # A value of 2 makes the spider slow, but no timeout on test.
+
+    name = 'Betsson'
+    allowed_domains = ['betsson.com', 'bpsgameserver.com']
+
+    start_urls=['https://sportsbook.betsson.com/en/']
+
+    #first get the league links
+    def parse(self, response):
+        sel = Selector(response)
+
+        base_url = "https://sb.bpsgameserver.com"
+        GETstr   = "/?token=00000000-0000-0000-0000-000000000000&"
+        GETstr  += "sid=601&lc=en&tz=GMT+Standard+Time&dc=GBP&c=en-GB&"
+        GETstr  += "pagemenuheaderurl=https://sportsbook.betsson.com/en/PageMenuHeader.aspx&"
+        GETstr  += "mainpromourl=https://sportsbook.betsson.com/en/MainPromo.aspx&"
+        GETstr  += "articleurl=https://sportsbook.betsson.com/en/&"
+        GETstr  += "sidebarpromourl=https://sportsbook.betsson.com/en/SidebarPromo.aspx&"
+        GETstr  += "proxyurl=https://sportsbook.betsson.com/Script/Cross-frame/proxy.html&"
+        GETstr  += "minigamesurl=https://sportsbook.betsson.com/en/MiniGameLauncher.aspx"
+
+        headers = {'Referer' : 'https://sportsbook.betsson.com/en/'}
+
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self,response):
+
+        sel = Selector(response)
+        all_scripts = sel.xpath('//script')
+        wanted_script = [script for script in all_scripts if 'firstLoadLeftMenuJsonData' in script.extract()]
+        print "[INFO %s]: \033[7m Number of wanted scripts: \033[34m %s \033[0m" % (self.name, len(wanted_script))
+        try:
+            wanted_script = wanted_script[0]
+        except IndexError:
+            print '[ERROR %s]:\033[7m\033[31m IndexError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+            print '[ERROR %s]:\033[31m\033[7m Getting wanted scripted:, it has %s elements \033[0m' % (self.name, len(wanted_script))
+            yield EventItem(odd1=[],odd2=[],odd3=[], eventName=[], eventDate=[],eventTime=[]) #return nothing
+
+        # need to get the 'var firstLoadLeftMenuJsonData = ...' line (even though looks like many lines)
+        # split on = then take after equals, then make valid JSON by chopping off start/end bits...
+        jsonLeftMenu = json.loads(wanted_script.extract().splitlines()[25].split('=')[1][2:-2])
+
+        # get football menu
+        for sportMenu in jsonLeftMenu['FetchLeftMenuExtResult']['c_c']:
+            if sportMenu['n'] == u'Football':
+                footballMenu = sportMenu
+
+        # get sub-leagues, store as list of dicts of name, id.
+        # since names may be useful for filtering later.
+        leagueList = []
+        for country in footballMenu['sc_r']:
+              for league in country['sc_c']:
+                  leagueList.append(dict(name=league['n'],id=league['i_c']))
+
+        with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+            print >>lfile, '*'*100
+            for league in leagueList:
+                print >>lfile, league['name'].encode('utf-8'),' with id:', league['id']
+            print >>lfile, '*'*100
+
+        base_url = 'https://sbfacade.bpsgameserver.com/PlayableMarketService/PlayableMarketServicesV2.svc/json2/FetchBetGroupMatrixItems?'
+        headers = { 'Referer': 'https://sb.bpsgameserver.com/static/flash/json.swf?v=14.17.1'}
+
+        #We will want bggi or betGroupGroupingID 36 for Match Winner only, not Outrights (143)
+        # Trying an outright only subcat, e.g. England/Season Bets : subCategoryIDs=4863, with bggi 36, will cause timeout? No just a null response.
+        # First make request for matrix items, this tells us if Match Winner/36 is an option, if so hit it.
+        for league in leagueList:
+            GETstr = 'segmentId=601&languageCode=en&subCategoryIds='+str(league['id'])
+            req= Request(url=base_url+GETstr, headers=headers, callback=self.pre_parse_Data)
+            req.meta['league'] = league # pass additional data to callback
+            yield req
+
+    def pre_parse_Data(self, response):
+        # get the league data we passed as arg through meta
+        league = response.meta['league']
+
+        # Is Match Winner an option? or just outrights.
+        jResp = json.loads(response.body)
+        jData = jResp['FetchBetGroupMatrixItemsResult']
+
+        headers = { 'Referer': 'https://sb.bpsgameserver.com/static/flash/json.swf?v=14.17.1'}
+        base_url = 'https://sbfacade.bpsgameserver.com/PlayableMarketService/PlayableMarketServicesV2.svc/json2/FetchSubcategoryBetgroupGroupings?'
+
+        hit = False
+        for mkt in jData:
+            if mkt['gn'] == u'Match Winner':
+                #if group name 'Match Winner' is avail, hit it.
+                hit = True
+        if hit:
+            GETstr = 'segmentId=601&languageCode=en&subCategoryIDs='+str(league['id'])+'&betGroupGroupingID=36&timeZoneStandardName=GMT Standard Time'
+            req= Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+            req.meta['league'] = league # pass additional data to callback
+            print ("[INFO %s]: \033[7m Going to hit league \033[32m %s \033[0m\033[7m"
+                   "with id \033[32m %s \033[0m"
+                   % (self.name, league['name'].encode('utf-8'), league['id']))
+            #wait = raw_input('ENTER TO CONT...')
+            yield req
+        else:
+            # Didn't find a Match Winner:
+            #print "[INFO %s]: \033[7m Filtering: no Match Winner mkt for URL: %s \033[0m" % (self.name,response.url[25:])
+            print ("[INFO %s]: \033[7m Filtering (no Match Winner) league"
+                   "\033[31m %s \033[0m\033[7m with id \033[31m %s \033[0m"
+                   % (self.name, league['name'].encode('utf-8'), league['id']))
+            print jData
+            #wait = raw_input('ENTER TO CONT...')
+            yield EventItem(odd1=[],odd2=[],odd3=[], eventName=[], eventDate=[],eventTime=[])
+
+    def parse_Data(self, response):
+
+        # get the league data we passed as arg through meta
+        league = response.meta['league']
+
+        #print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[25:])
+        print ("[INFO %s]: \033[7m Going to parse league"
+               "\033[34m %s \033[7m with id \033[34m %s \033[0m"
+               % (self.name, league['name'].encode('utf-8'), league['id']))
+
+        jsonResp = json.loads(response.body)
+        jsonData = jsonResp['FetchSubcategoryBetgroupGroupingsResult']
+
+        if jsonData == 'null':
+            print '[ERROR %s]:\033[7m\033[31m Null response  for site: %s \033[0m' % (self.name, response.url)
+            return []
+
+        try:
+            jsonEvents = jsonData['scbgg_c'][0]['m_c']
+        except (KeyError, TypeError):
+            print ('[ERROR %s]:\033[7m\033[31m No events for league %s with id %s'
+                   '. Is jsonData empty? \033[0m'
+                   % (self.name, league['name'].encode('utf-8'), league['id']))
+            print jsonData
+            return []
+
+        items = []
+        for jsonEvent in jsonEvents:
+            item = EventItem()
+
+            # eventName
+            item['eventName'] = [jsonEvent['n']]
+            if item['eventName']:
+                item['eventName'] = [name.replace(' - ', ' V ') for name in item['eventName']]
+
+            #date and time
+            date = jsonEvent['dd'] #11/05/2014
+            time = jsonEvent['dt'] # 15:00
+            date = [datetime.datetime.strptime(date, '%d/%m/%Y').strftime('%m %d')]
+            item['eventDate'] = date
+            item['eventTime'] = [time]
+
+            # odds
+            item['odd1'] = []
+            item['odd3'] = []
+            item['odd2'] = []
+            for jsonOdd in jsonEvent['ms_c']:
+                    if jsonOdd['dn'] == u'1':
+                        #home
+                        item['odd1'] = [jsonOdd['os']]
+                    elif jsonOdd['dn'] == u'X':
+                        #draw
+                        item['odd3'] = [jsonOdd['os']]
+                    elif jsonOdd['dn'] == u'2':
+                        #away
+                        item['odd2'] = [jsonOdd['os']]
+
+            items.append(item)
+
+        return items
+

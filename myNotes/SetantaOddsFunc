@@ -1,0 +1,1753 @@
+jsRegister('/JSComponents/Global.js');
+jsRequire("/JSComponents/jquery.js");
+jsRequire("/JSComponents/StringExt.js");
+jsRequire("/JSComponents/Constants.js");
+jsRequire("/JSComponents/Data/UserInfo.js");
+jsRequire('/JSComponents/Pages/lightBox.js');
+jsRequire('/JSComponents/data/FractionalOddsConverter.js');
+jsRequire("/JSComponents/jquery.jgrowl.js");
+jsRequire('/JSComponents/Pages/VerifyLogin.js');
+jsRequire('/JSComponents/WHLSpecific.js');
+jsRequire('/JSComponents/Elements/TimezoneMenu.js');
+jsRequire('/PageMethods.aspx');
+var isDebug = false;
+
+function pageBack() {
+    if (Page.current) {
+        Page.current.popContent();
+    }
+}
+
+function doLogin() {
+    var user = $("#login_username").val();
+    var pass = $("#login_password").val();
+    PageMethods.Login(user, pass, function(result, context) {}, function(result, context) {}, Page.current);
+}
+
+function doLogout() {}
+
+function shouldRound(eventType, linetype) {
+    if (linetype && linetype >= 18 && linetype <= 29)
+        return false;
+    return !(linetype && (eventType == 0 || eventType == 39 || eventType == 1) && (linetype == 2 || linetype == 3));
+}
+
+function formatOdds(odds, oddsStyle, eventType, linetype, betType, branch, fractionalOdds) {
+    if (oddsStyle == OddStyle.FRACTIONAL || typeof(oddsStyle) == "undefined" && currentOddStyle == OddStyle.FRACTIONAL)
+        return (fractionalOdds ? fractionalOdds : odds);
+    var format = showDecimalInsteadOfAsian(betType, eventType, linetype, branch) ? constBetFormatEuropean : constBetFormat;
+    if (typeof(oddsStyle) != "undefined") {
+        switch (oddsStyle) {
+            case OddStyle.AMERICAN:
+                {
+                    format = constBetFormatAmerican;
+                    break;
+                }
+            case OddStyle.EUROPEAN:
+                {
+                    format = constBetFormatEuropean;
+                    break;
+                }
+            case OddStyle.MALAY:
+                {
+                    format = constBetFormatMalay;
+                    break;
+                }
+            case OddStyle.INDO:
+                {
+                    format = constBetFormatIndo;
+                    break;
+                }
+            case OddStyle.HONGKONG:
+                {
+                    format = constBetFormatHongkong;
+                    break;
+                }
+        }
+    }
+    var format = "{0:" + format + "}";
+    return format.format(odds);
+}
+
+function getFormattedOdds(odds, eventType, linetype, clear, oddsStyle, betType, branch, fractionalOdds) {
+    var oddsToFormat = getOdds(odds, eventType, linetype, clear, oddsStyle, betType, branch, fractionalOdds);
+    return formatOdds(oddsToFormat, oddsStyle, eventType, linetype, betType, branch);
+}
+
+function getFormatAbbreviation(oddStyleID, betType, eventType, linetype, branch) {
+    var abbreviation = " ";
+    if (typeof(oddStyleID) == "undefined") {
+        oddStyleID = showDecimalInsteadOfAsian(betType, eventType, linetype, branch) ? OddStyle.EUROPEAN : currentOddStyle;
+    }
+    if (hasAsianOdds) {
+        switch (oddStyleID) {
+            case OddStyle.EUROPEAN:
+                {
+                    abbreviation += $string("General").EuropeanAbbreviation;
+                    break;
+                }
+            case OddStyle.MALAY:
+                {
+                    abbreviation += $string("General").MalayAbbreviation;
+                    break;
+                }
+            case OddStyle.INDO:
+                {
+                    abbreviation += $string("General").IndoAbbreviation;
+                    break;
+                }
+            case OddStyle.HONGKONG:
+                {
+                    abbreviation += $string("General").HongkongAbbreviation;
+                    break;
+                }
+        }
+    }
+    return abbreviation;
+}
+
+function getOdds(odds, eventType, linetype, clear, oddsStyle, betType, branch, fractionalOdds) {
+    if (odds == 0) return 0;
+    if (!clear && shouldRound(eventType, linetype)) {
+        odds = getOddsRounded(odds);
+    }
+    var oddsStyleToConvertTo = showDecimalInsteadOfAsian(betType, eventType, linetype, branch) ? OddStyle.EUROPEAN : currentOddStyle;
+    oddsStyleToConvertTo = oddsStyle ? oddsStyle : oddsStyleToConvertTo;
+    switch (oddsStyleToConvertTo) {
+        case OddStyle.AMERICAN:
+            {
+                return odds;
+            }
+        case OddStyle.EUROPEAN:
+            {
+                return getOddsFromAmericanToEU(odds);
+            }
+        case OddStyle.FRACTIONAL:
+            {
+                if (fractionalOdds)
+                    return fractionalOdds;
+                else
+                    return FractionalOddsConverter.convert(odds);
+            }
+        case OddStyle.MALAY:
+            {
+                return decimalOddToMalaysian(getOddsFromAmericanToEU(odds));
+            }
+        case OddStyle.INDO:
+            {
+                return americanOddToIndonesian(odds);
+            }
+        case OddStyle.HONGKONG:
+            {
+                return decimalOddToHongKong(getOddsFromAmericanToEU(odds));
+            }
+    }
+}
+
+function getOddsRounded(odds) {
+    if (Math.abs(odds) < 600) {
+        var outOdds = Math.round(odds / 5) * 5;
+        return (outOdds == -100) ? 100 : outOdds;
+    } else if (odds > -1000 && odds < 0)
+        return Math.floor(odds / 5) * 5;
+    else
+        return Math.floor(odds / 25) * 25;
+}
+
+function getOddsFromEU(odds, oddsStyle) {
+    if (odds == 0) return 0;
+    var oddsStyleToConvertTo = oddsStyle ? oddsStyle : currentOddStyle;
+    switch (oddsStyleToConvertTo) {
+        case OddStyle.AMERICAN:
+            return decimalOddToAmerican(odds);
+        case OddStyle.FRACTIONAL:
+            return FractionalOddsConverter.convert(decimalOddToAmerican(odds));
+        case OddStyle.EUROPEAN:
+            return odds;
+        case OddStyle.HONGKONG:
+            return decimalOddToHongKong(odds);
+        case OddStyle.INDO:
+            return decimalOddToIndonesian(odds);
+        case OddStyle.MALAY:
+            return decimalOddToMalaysian(odds);
+    }
+}
+
+function getOddsFromAmerican(odds, oddsStyle) {
+    if (odds == 0) return 0;
+    var oddsStyleToConvertTo = oddsStyle ? oddsStyle : currentOddStyle;
+    switch (oddsStyleToConvertTo) {
+        case OddStyle.AMERICAN:
+            {
+                return odds;
+            }
+        case OddStyle.FRACTIONAL:
+            {
+                return FractionalOddsConverter.convert(odds);
+            }
+        case OddStyle.EUROPEAN:
+            {
+                return getOddsFromAmericanToEU(odds);
+            }
+        case OddStyle.MALAY:
+            {
+                return decimalOddToMalaysian(getOddsFromAmericanToEU(odds));
+            }
+        case OddStyle.INDO:
+            {
+                return americanOddToIndonesian(odds)
+            }
+        case OddStyle.HONGKONG:
+            {
+                return decimalOddToHongKong(getOddsFromAmericanToEU(odds));
+            }
+    }
+}
+
+function getComboOdds(odds, rate, eventType, linetype, clear) {
+    if (odds == 0) return 0;
+    if (rate == undefined) rate = 1;
+    if (!clear && shouldRound(eventType, linetype)) {
+        odds = getOddsRounded(odds);
+    }
+    if (rate == 1) {
+        switch (currentOddStyle) {
+            case OddStyle.AMERICAN:
+                {
+                    return odds;
+                }
+            case OddStyle.EUROPEAN:
+                {
+                    return getOddsFromAmericanToEU(odds);
+                }
+            case OddStyle.FRACTIONAL:
+                {
+                    return FractionalOddsConverter.convert(odds);
+                }
+            case OddStyle.MALAY:
+                {
+                    return decimalOddToMalaysian(getOddsFromAmericanToEU(odds));
+                }
+            case OddStyle.INDO:
+                {
+                    return americanOddToIndonesian(odds);
+                }
+            case OddStyle.HONGKONG:
+                {
+                    return decimalOddToHongKong(getOddsFromAmericanToEU(odds));
+                }
+        }
+    } else {
+        var d_odd = ((odds > 0) ? (1 + odds / 100) : (1 - 100 / odds));
+        d_odd = d_odd * rate;
+        d_odd = (odds > -10000) ? (Math.floor((d_odd * 100).toPrecision(12)) / 100) : d_odd;
+        switch (currentOddStyle) {
+            case OddStyle.AMERICAN:
+                return decimalOddToAmerican(d_odd);
+            case OddStyle.EUROPEAN:
+                return d_odd;
+            case OddStyle.FRACTIONAL:
+                return FractionalOddsConverter.convert(decimalOddToAmerican(d_odd));
+            case OddStyle.MALAY:
+                return decimalOddToMalaysian(d_odd);
+            case OddStyle.INDO:
+                return decimalOddToIndonesian(d_odd);
+            case OddStyle.HONGKONG:
+                return decimalOddToHongKong(d_odd);
+        }
+    }
+}
+
+function decimalOddToAmerican(odd) {
+    if (odd >= 2)
+        return Math.floor((odd * 100 - 100).toPrecision(12));
+    else
+        return Math.floor(((-1 / (odd - 1)) * 100).toPrecision(12));
+}
+
+function decimalOddToHongKong(odd) {
+    return odd - 1;
+}
+
+function hongKongToDecimal(odd) {
+    return odd + 1;
+}
+
+function decimalOddToMalaysian(odd) {
+    if (odd <= 2) {
+        return odd - 1;
+    } else {
+        if (typeof constBetFormatMalay != "undefined" && constBetFormatMalay == "0.00#" && odd <= 101)
+            return Math.ceil((1 / (1 - odd) * 100).toPrecision(12)) / 100;
+        else
+            return (1 / (1 - odd));
+    }
+}
+
+function malaysianToDecimal(odd) {
+    if (odd >= 0 && odd <= 1) {
+        return odd + 1;
+    } else {
+        return 1 - 1 / odd;
+    }
+}
+
+function decimalOddToIndonesian(odd) {
+    if (odd < 2) {
+        return Math.floor((1 / (1 - odd) * 1000).toPrecision(12)) / 1000;
+    } else {
+        return odd - 1;
+    }
+}
+
+function indonesianToDecimal(odd) {
+    if (odd >= 1) {
+        return odd + 1;
+    } else {
+        return Math.floor(((1 - 1 / odd) * 100).toPrecision(12)) / 100;
+    }
+}
+
+function americanOddToIndonesian(odd) {
+    return odd / 100;
+}
+
+function getFormattedPoints(pts, isOver, isUnder, showOUAbbreviation) {
+    if (typeof pts == "undefined")
+        return "";
+    if (typeof(isAsianStyleForPointsEnabled) != "undefined" && isAsianStyleForPointsEnabled) {
+        if (Math.abs(pts - pts.toFixed(0)) == 0.25) {
+            if (!isOver && !isUnder) {
+                var isPositiveHC = (pts + 0.25 > 0);
+                return isPositiveHC ? constPtsAsianHCFormat.format(pts - 0.25, pts + 0.25) : constPtsAsianHCFormat.format(pts + 0.25, pts - 0.25);
+            }
+            if (showOUAbbreviation) {
+                var OUAbbrev = isOver ? $string("General").OverShort : $string("General").UnderShort;
+                return constPtsAsianOUFormat.format(OUAbbrev + " ", pts - 0.25, pts + 0.25);
+            } else {
+                return constPtsAsianOUFormat.format("", pts - 0.25, pts + 0.25);
+            }
+        }
+    }
+    if (!isOver && !isUnder) {
+        return pts.toStringEx(constPtsFormat);
+    }
+    if (showOUAbbreviation) {
+        var OUAbbrev = isOver ? $string("General").OverShort : $string("General").UnderShort;
+        return OUAbbrev + " " + pts.toStringEx(constPtsOUFormat);
+    } else {
+        return pts.toStringEx(constPtsOUFormat);
+    }
+}
+
+function showDecimalInsteadOfAsian(betType, eventType, lineType, branch) {
+    if (currentOddStyle != OddStyle.MALAY && currentOddStyle != OddStyle.INDO && currentOddStyle != OddStyle.HONGKONG)
+        return false;
+    if (betType == 7 && eventType != undefined && eventType != 38 || lineType == 1 && branch == 1)
+        return true;
+    return false;
+}
+
+function getAsianOddStyleClassList(odds, update, isLive) {
+    var classList = "";
+    if (update !== null && typeof update !== "undefined" && isLive) {
+        if (update > 0)
+            classList += " oddWentDown";
+        if (update < 0)
+            classList += " oddWentUp";
+    }
+    if (typeof odds !== "undefined") {
+        if (!isNaN(Number(odds)) && Number(odds) < 0)
+            classList += " negativeOdds";
+    }
+    return classList;
+}
+
+function compare(a1, a2) {
+    if (typeof a1 == "string" && typeof a2 == "number")
+        a1 = parseInt(a1, 10);
+    else if (typeof a1 == "number" && typeof a2 == "string")
+        a2 = parseInt(a2, 10);
+    else if (typeof a1 == "string" && typeof a2 == "string") {
+        a1 = parseInt(a1, 10);
+        a2 = parseInt(a2, 10);
+    }
+    var a1e = typeof a1 == 'undefined' || a1 == null || a1 == '';
+    var a2e = typeof a2 == 'undefined' || a2 == null || a2 == '';
+    if (a1e && a2e) return 0;
+    if (a1e) return -1;
+    if (a2e) return 1;
+    if (a1 > a2) return 1;
+    if (a1 < a2) return -1;
+    return 0;
+}
+
+function compareWC(a1, a2, a1team1, a1team2, a2team1, a2team2) {
+    if (isWCTeam(a1team1) && isWCTeam(a1team2)) return -1;
+    if (isWCTeam(a2team1) && isWCTeam(a2team2)) return 1;
+    return compare(a1, a2);
+}
+
+function isWCTeam(team1) {
+    var WCTeams = ['South Africa', 'Mexico', 'France', 'Uruguay', 'Argentina', 'Nigeria', 'Greece', 'South Korea', 'England', 'USA', 'Slovenia', 'Algeria', 'Ghana', 'Serbia', 'Germany', 'Australia', 'Netherlands', 'Denmark', 'Cameroon', 'Japan', 'Italy', 'Paraguay', 'Slovakia', 'New Zealand', 'Ivory Coast', 'Portugal', 'Brazil', 'North Korea', 'Chile', 'Honduras', 'Spain', 'Switzerland', 'Μεξικό', 'Νότια Αφρική', 'Γαλλία', 'Ουρουγουάη', 'Νότια Κορέα', 'Αργεντινή', 'Νιγηρία', 'Ελλάδα', 'Σλοβενία', 'Αγγλία', 'Η.Π.Α.', 'Αλγερία', 'Γερμανία', 'Γκάνα', 'Σερβία', 'Αυστραλία', 'Καμερούν', 'Δανία', 'Ιαπωνία', 'Ολλανδία', 'Ιταλία', 'Νέα Ζηλανδία', 'Παραγουάη', 'Σλοβακία', 'Βραζιλία', 'Ακτή Ελεφαντοστού', 'Βόρεια Κορέα', 'Πορτογαλία', 'Χιλή', 'Ονδούρα', 'Ισπανία', 'Ελβετία'];
+    for (var i = 0; i < WCTeams.length; i++) {
+        if (team1 == WCTeams[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function setOverlay(dest, block) {
+    var rect = {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0
+    };
+    var objs = $("#" + dest);
+    objs.each(function() {
+        rect.height += $(this).outerHeight();
+        rect.width = rect.width ? rect.outerWidth : $(this).outerWidth() - 2;
+        rect.left = rect.left ? rect.left : $(this).offset().left;
+        var top = $(this).offset().top;
+        rect.top = (rect.top < top) && (rect.top > 0) ? rect.top : top;
+    });
+    $("#" + block).css(rect).show();
+}
+
+function getOddsFromAmericanToEU(odds) {
+    if (odds == 0) return 0;
+    var nod = (odds > 0) ? (1 + odds / 100) : (1 - 100 / odds);
+    return (odds > -10000) ? (Math.floor((nod * 100).toPrecision(12)) / 100) : nod;
+}
+var debug_texts = [];
+
+function debug(text) {
+    return;
+    if (debug_texts.length > 150) return;
+    debug_texts.push((new Date).toStringEx("[HH:mm:ss]") + "&nbsp;" + text);
+    $("#debug_place").html(debug_texts.join("<br>"));
+}
+
+function clear_debug() {
+    debug_texts = [];
+    $("#debug_place").html("");
+}
+jQuery.fn.extend({
+    disable: function() {
+        return this.attr("disabled", true);
+    },
+    enable: function() {
+        return this.attr("disabled", false);
+    }
+});
+
+function roundMinBet(minBet) {
+    return Math.ceil(minBet * 100) / 100;
+}
+
+function switchOddsStyle(style) {
+    setOddStyle(style);
+}
+
+function setOddStyle(style) {
+    initOddStyle(style);
+    executeEvents(setOddStyle.listeners, null, style);
+    setCookie(constOddStyleCookie, style);
+}
+setOddStyle.listeners = [];
+
+function switchComboMode() {
+    if (EventFilterMode == enEventFilterMode.Standart)
+        setFilterStyle(enEventFilterMode.Combo);
+    else
+        setFilterStyle(enEventFilterMode.Standart);
+}
+
+function setFilterStyle(style) {
+    if (EventFilterMode == style) return;
+    EventFilterMode = style;
+    for (var key in setFilterStyle.listeners) {
+        setFilterStyle.listeners[key]();
+    }
+    switch (EventFilterMode) {
+        case enEventFilterMode.Standart:
+            $("#comboSwitcher A").html("Combo");
+            $(document.body).removeClass("comboMode");
+            break;
+        case enEventFilterMode.Combo:
+            $("#comboSwitcher A").html("Single");
+            $(document.body).addClass("comboMode");
+            break;
+    }
+}
+setFilterStyle.listeners = [];
+
+function getCookie(c_name) {
+    var ccc = document.cookie;
+    if (ccc.length > 0) {
+        c_start = ccc.indexOf(c_name + "=");
+        if (c_start != -1) {
+            c_start = c_start + c_name.length + 1;
+            c_end = ccc.indexOf(";", c_start);
+            if (c_end == -1) c_end = ccc.length;
+            return unescape(ccc.substring(c_start, c_end));
+        }
+    }
+    return undefined;
+}
+
+function setCookie(c_name, value, expiredays) {
+    var exdate = new Date();
+    if (expiredays)
+        exdate.setDate(exdate.getDate() + expiredays);
+    else
+        exdate.setDate(exdate.getDate() + 360);
+    document.cookie = c_name + "=" + escape(value) + ((expiredays == null) ? "" : ";expires=" + exdate.toGMTString()) + ";" + getDomainNameForCookie() + " path=/";
+}
+
+function removeCookie(c_name) {
+    if (getCookie(name)) {
+        document.cookie = c_name + "=" + ";expires=Thu, 01-Jan-1970 00:00:01 GMT;" + getDomainNameForCookie() + " path=/";
+    }
+}
+var SLDs = ["co.at", "*.ar", "*.au", "*.bd", "*.bn", "*.bt", "*.ck", "*.cy", "*.do", "*.eg", "*.er", "*.et", "*.fj", "*.fk", "*.gt", "*.gu", "*.id", "*.il", "*.jm", "*.ke", "*.kh", "*.kw", "*.mm", "*.mt", "*.mz", "*.ni", "*.np", "*.nz", "*.om", "*.pg", "*.py", "*.qa", "*.sv", "*.tr", "*.uk", "*.uy", "*.ve", "*.ye", "*.yu", "*.za", "*.zm", "*.zw"];
+
+function getDomainNameForCookie() {
+    var hostname = window.location.hostname;
+    if (hostname == "localhost")
+        return "";
+    var domainName = "";
+    var domainNameLevel = 0;
+    for (i = 0; i < SLDs.length; i++) {
+        var isStrict = (SLDs[i].indexOf("*.") == 0) ? false : true;
+        var sld = isStrict ? SLDs[i] : SLDs[i].substring(2);
+        if (hostname.indexOf("." + sld) != -1 && hostname.indexOf("." + sld) == (hostname.length - sld.length) - 1) {
+            var domainParts = (hostname.replace("." + sld, "")).split(".");
+            var level = sld.split('.').length;
+            if (isStrict && domainParts.length > 0 && level > domainNameLevel) {
+                domainName = "." + domainParts[domainParts.length - 1] + "." + sld;
+                domainNameLevel = domainParts.length;
+            } else if (!isStrict && domainParts.length > 1 && level > domainNameLevel) {
+                domainName = "." + domainParts[domainParts.length - 2] + "." + domainParts[domainParts.length - 1] + "." + sld;
+                domainNameLevel = domainParts.length;
+            }
+        }
+    }
+    if (domainName == "") {
+        var domainParts = hostname.split(".");
+        if (domainParts.length > 1)
+            domainName = "." + domainParts[domainParts.length - 2] + "." + domainParts[domainParts.length - 1];
+    }
+    cookieDomain = (domainName == "") ? "" : "domain=" + domainName + ";";
+    return cookieDomain;
+}
+
+function updateTime() {
+    if (!serverdate) return;
+    var timeZoneSign = "";
+    if (currentTimeZone > 0)
+        timeZoneSign = "+";
+    $("#time").html(getDataTime(serverdate).toStringEx("HH:mm:ss") + " (GMT" + (currentTimeZone != 0 ? (" " + timeZoneSign + currentTimeZone) : "") + ")");
+    $("#time").css("visibility", "visible");
+    $("#date").html(getDataTime(serverdate).toStringEx("MMMM d DD, YYYY"));
+    $("#date").css("visibility", "visible");
+}
+$(function() {
+    jsRequire("/JSComponents/TimeControl.js");
+    timeControl.reloadServerTime();
+    setInterval(updateTime, 1000);
+    updateTime();
+});
+
+function executeEvents(events, sender, data) {
+    for (var key in events) {
+        events[key](sender, data);
+    }
+}
+
+function cancelBubble(e) {
+    if (!e) var e = window.event;
+    e.cancelBubble = true;
+    if (e.stopPropagation) e.stopPropagation();
+}
+
+function showHideZero(elem, show) {
+    if (show) {
+        if ($.trim(elem.value) == "0") elem.value = "";
+    } else {
+        if ($.trim(elem.value) == "") elem.value = "0";
+    }
+}
+
+function goToMainGame(id) {
+    window.location.replace(application_root + "/Bets/viewEventLinesList.aspx?LEID=" + id);
+}
+
+function underMaintence() {
+    window.location.replace(application_root + "/UnderConstructionPage.aspx");
+}
+
+function OpenStats(homeEnetplusID, awayEnetplusID, BranchEnetPulseID) {
+    if (BranchEnetPulseID == '')
+        BranchEnetPulseID = 's';
+    if (homeEnetplusID == null || awayEnetplusID == null || BranchEnetPulseID == null) return;
+    var url = WHLSpecificConstants.GameStatisticsURL + homeEnetplusID + "&a_id=" + awayEnetplusID + "&g=" + BranchEnetPulseID;
+    var feat = "left=100,top=50,width=1070,height=600,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=yes,resizable=no,copyhistory=no";
+    var wind = window.open(url, "Statistics", feat);
+    if (wind == null)
+        alert("Please disable popup blockers to allow statistics window to open.");
+}
+
+function openStatistics() {
+    window.open(WHLSpecificConstants.GeneralStatisticsURL);
+}
+
+function openLiveResults() {
+    window.open(WHLSpecificConstants.LiveResultURL);
+}
+$(document).ready(function() {
+    initOddStyle(getCookie(constOddStyleCookie) * 1);
+    $(".all_leagues li, .top_leagues li").not(".chkd").mouseover(function() {
+        $(this).addClass('chkd');
+    }).mouseout(function() {
+        $(this).removeClass('chkd');
+    });
+    $("#live_now li").click(function() {
+        var url = $(this).find("a").attr("href");
+        window.location.replace(url);
+    });
+    $("#live_now li").mouseover(function() {
+        $(this).addClass('on');
+    }).mouseout(function() {
+        $(this).removeClass('on');
+    });
+    $("#betting_slip #combo_options .inr").hide();
+    $("#betting_slip #combo_options h3").click(function() {
+        $(this).toggleClass("on");
+        $("#betting_slip #combo_options .inr").toggle();
+    });
+    $("#methods_pnl .more").toggle(function() {
+        $("#methods_pnl ul").removeAttr("left");
+        $('#methods_pnl ul').css('left', '-700px');
+        $("#methods_pnl .more").addClass('back');
+        $("#methods_pnl .more a").html($string("General").Back);
+    }, function() {
+        $("#methods_pnl ul").removeAttr("left");
+        $('#methods_pnl ul').css('left', '0');
+        $("#methods_pnl .more").removeClass('back');
+        $("#methods_pnl .more a").html($string("BetsTable").More);
+    });
+    $("#logged .logout").click(function() {
+        $("#logged").hide();
+        $("#login").show();
+    });
+    $("#login .btn").click(function() {
+        $("#login").hide();
+        $("#logged").show();
+    });
+    $("#odds_style2 .closed").click(function() {
+        if ($("#odds_style2 .closed .current a")[0].innerHTML.indexOf($string("General").American) != -1) {
+            $("#odds_style2 .opened li.odd_1").html('<a name="fractions" href="javascript:setOddStyle(2)">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+            $("#odds_style2 .opened li.odd_2").html('<a name="decimal" href="javascript:setOddStyle(1)">' + $string("Odds").European + ': (1.80)' + '</a>');
+            $("#odds_style2 .opened li.odd_3").html('<a name="american" href="javascript:;">' + $string("Odds").American + ': (-125)' + '</a>');
+        } else if ($("#odds_style2 .closed .current a")[0].innerHTML.indexOf($string("Odds").European) != -1) {
+            $("#odds_style2 .opened li.odd_1").html('<a name="american" href="javascript:setOddStyle(0)">' + $string("Odds").American + ': (-125)' + '</a>');
+            $("#odds_style2 .opened li.odd_2").html('<a name="fractions" href="javascript:setOddStyle(2)">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+            $("#odds_style2 .opened li.odd_3").html('<a name="decimal" href="javascript:;">' + $string("Odds").European + ': (1.80)' + '</a>');
+        } else {
+            $("#odds_style2 .opened li.odd_1").html('<a name="decimal" href="javascript:setOddStyle(1)">' + $string("Odds").European + ': (1.80)' + '</a>');
+            $("#odds_style2 .opened li.odd_2").html('<a name="american" href="javascript:setOddStyle(0)">' + $string("Odds").American + ': (-125)' + '</a>');
+            $("#odds_style2 .opened li.odd_3").html('<a name="decimal" href="javascript:;">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+        }
+        $("#odds_style2 .closed").hide();
+        $("#odds_style2 .opened").show();
+        $("#odds_style2").addClass("op");
+    });
+    $("#odds_style2 .opened li").click(function() {
+        $("#odds_style2").removeClass("op");
+        $("#odds_style2 .opened").hide();
+        $("#odds_style2 .closed").show();
+    });
+    $(".languages2_odds_contener #odds_style2").mouseleave(function() {
+        $("#odds_style2").removeClass("op");
+        $("#odds_style2 .opened").hide();
+        $("#odds_style2 .closed").show();
+    });
+    $("#languages2 .closed").click(function() {
+        $("#languages2 .closed").hide();
+        $("#languages2 .opened").show();
+        return false;
+    });
+    $("#languages2 .opened").click(function() {
+        $("#languages2 .opened").hide();
+        $("#languages2 .closed").show();
+        return false;
+    });
+    $("#myAccountMenu .closed").click(function() {
+        $("#languages2 .closed").hide();
+        $("#languages2 .opened").show();
+        return false;
+    });
+    $("#myAccountMenu .opened").click(function() {
+        $("#languages2 .opened").hide();
+        $("#languages2 .closed").show();
+        return false;
+    });
+    InitializeNewOddControls();
+    SetNewOddStyleCurrentTitle(currentOddStyle);
+    PageMethods.GetOddStyles(function(result) {
+        var oddStyles = eval(result);
+        hasAsianOdds = false;
+        for (i in oddStyles) {
+            if (oddStyles[i] == OddStyle.MALAY || oddStyles[i] == OddStyle.INDO || oddStyles[i] == OddStyle.HONGKONG) {
+                hasAsianOdds = true;
+            }
+        }
+    });
+});
+
+function InitializeNewOddControls() {
+    $("#odd_style_current").mouseover(function() {
+        var titleAmerican = $string("Odds").American + ": (-125)";
+        var titleFractnal = $string("Odds").Fractional + ": (1/2)";
+        var titleEuropnal = $string("Odds").European + ": (1.80)";
+        switch (currentOddStyle) {
+            case OddStyle.AMERICAN:
+                {
+                    $("#odd_style_1").html(titleFractnal);
+                    $("#odd_style_1").attr("title", titleFractnal);
+                    $("#odd_style_1").attr("href", "javascript:setOddStyle(2)");
+                    $("#odd_style_2").html(titleEuropnal);
+                    $("#odd_style_2").attr("title", titleEuropnal);
+                    $("#odd_style_2").attr("href", "javascript:setOddStyle(1)");
+                    break;
+                }
+            case OddStyle.FRACTIONAL:
+                {
+                    $("#odd_style_1").html(titleAmerican);
+                    $("#odd_style_1").attr("title", titleAmerican);
+                    $("#odd_style_1").attr("href", "javascript:setOddStyle(0)");
+                    $("#odd_style_2").html(titleEuropnal);
+                    $("#odd_style_2").attr("title", titleEuropnal);
+                    $("#odd_style_2").attr("href", "javascript:setOddStyle(1)");
+                    break;
+                }
+            case OddStyle.EUROPEAN:
+            default:
+                {
+                    $("#odd_style_1").html(titleAmerican);
+                    $("#odd_style_1").attr("title", titleAmerican);
+                    $("#odd_style_1").attr("href", "javascript:setOddStyle(0)");
+                    $("#odd_style_2").html(titleFractnal);
+                    $("#odd_style_2").attr("title", titleFractnal);
+                    $("#odd_style_2").attr("href", "javascript:setOddStyle(2)");
+                    break;
+                }
+        }
+    });
+    $("#asian_odd_style_current").mouseover(function() {
+        var titleHongKong = $string("Odds").HongKong + ": (0.80)";
+        var titleMalay = $string("Odds").Malaysian + ": (0.80)";
+        var titleIndo = $string("Odds").Indonesian + ": (-1.25)";
+        var titleAmerican = $string("Odds").American + ": (-125)";
+        var titleEuropnal = $string("Odds").European + ": (1.80)";
+        var asianOddsChange = "";
+        if (typeof AsianSkinPanelManager !== "undefined") {
+            asianOddsChange = "AsianSkinPanelManager.updateAllPanels();";
+        }
+        switch (currentOddStyle) {
+            case OddStyle.MALAY:
+                {
+                    $("#asian_odd_style_1").html(titleHongKong);
+                    $("#asian_odd_style_1").attr("title", titleHongKong);
+                    $("#asian_odd_style_1").attr("href", "javascript:setOddStyle(3);" + asianOddsChange);
+                    $("#asian_odd_style_2").html(titleEuropnal);
+                    $("#asian_odd_style_2").attr("title", titleEuropnal);
+                    $("#asian_odd_style_2").attr("href", "javascript:setOddStyle(1);" + asianOddsChange);
+                    $("#asian_odd_style_3").html(titleIndo);
+                    $("#asian_odd_style_3").attr("title", titleIndo);
+                    $("#asian_odd_style_3").attr("href", "javascript:setOddStyle(5);" + asianOddsChange);
+                    $("#asian_odd_style_4").html(titleAmerican);
+                    $("#asian_odd_style_4").attr("title", titleAmerican);
+                    $("#asian_odd_style_4").attr("href", "javascript:setOddStyle(0);" + asianOddsChange);
+                    break;
+                }
+            case OddStyle.EUROPEAN:
+                {
+                    $("#asian_odd_style_1").html(titleHongKong);
+                    $("#asian_odd_style_1").attr("title", titleHongKong);
+                    $("#asian_odd_style_1").attr("href", "javascript:setOddStyle(3);" + asianOddsChange);
+                    $("#asian_odd_style_2").html(titleMalay);
+                    $("#asian_odd_style_2").attr("title", titleMalay);
+                    $("#asian_odd_style_2").attr("href", "javascript:setOddStyle(4);" + asianOddsChange);
+                    $("#asian_odd_style_3").html(titleIndo);
+                    $("#asian_odd_style_3").attr("title", titleIndo);
+                    $("#asian_odd_style_3").attr("href", "javascript:setOddStyle(5);" + asianOddsChange);
+                    $("#asian_odd_style_4").html(titleAmerican);
+                    $("#asian_odd_style_4").attr("title", titleAmerican);
+                    $("#asian_odd_style_4").attr("href", "javascript:setOddStyle(0);" + asianOddsChange);
+                    break;
+                }
+            case OddStyle.INDO:
+                {
+                    $("#asian_odd_style_1").html(titleHongKong);
+                    $("#asian_odd_style_1").attr("title", titleHongKong);
+                    $("#asian_odd_style_1").attr("href", "javascript:setOddStyle(3);" + asianOddsChange);
+                    $("#asian_odd_style_2").html(titleMalay);
+                    $("#asian_odd_style_2").attr("title", titleMalay);
+                    $("#asian_odd_style_2").attr("href", "javascript:setOddStyle(4);" + asianOddsChange);
+                    $("#asian_odd_style_3").html(titleEuropnal);
+                    $("#asian_odd_style_3").attr("title", titleEuropnal);
+                    $("#asian_odd_style_3").attr("href", "javascript:setOddStyle(1);" + asianOddsChange);
+                    $("#asian_odd_style_4").html(titleAmerican);
+                    $("#asian_odd_style_4").attr("title", titleAmerican);
+                    $("#asian_odd_style_4").attr("href", "javascript:setOddStyle(0);" + asianOddsChange);
+                    break;
+                }
+            case OddStyle.AMERICAN:
+                {
+                    $("#asian_odd_style_1").html(titleHongKong);
+                    $("#asian_odd_style_1").attr("title", titleHongKong);
+                    $("#asian_odd_style_1").attr("href", "javascript:setOddStyle(3);" + asianOddsChange);
+                    $("#asian_odd_style_2").html(titleMalay);
+                    $("#asian_odd_style_2").attr("title", titleMalay);
+                    $("#asian_odd_style_2").attr("href", "javascript:setOddStyle(4);" + asianOddsChange);
+                    $("#asian_odd_style_3").html(titleEuropnal);
+                    $("#asian_odd_style_3").attr("title", titleEuropnal);
+                    $("#asian_odd_style_3").attr("href", "javascript:setOddStyle(1);" + asianOddsChange);
+                    $("#asian_odd_style_4").html(titleIndo);
+                    $("#asian_odd_style_4").attr("title", titleIndo);
+                    $("#asian_odd_style_4").attr("href", "javascript:setOddStyle(5);" + asianOddsChange);
+                    break;
+                }
+            case OddStyle.HONGKONG:
+            default:
+                {
+                    $("#asian_odd_style_1").html(titleMalay);
+                    $("#asian_odd_style_1").attr("title", titleMalay);
+                    $("#asian_odd_style_1").attr("href", "javascript:setOddStyle(4);" + asianOddsChange);
+                    $("#asian_odd_style_2").html(titleEuropnal);
+                    $("#asian_odd_style_2").attr("title", titleEuropnal);
+                    $("#asian_odd_style_2").attr("href", "javascript:setOddStyle(1);" + asianOddsChange);
+                    $("#asian_odd_style_3").html(titleIndo);
+                    $("#asian_odd_style_3").attr("title", titleIndo);
+                    $("#asian_odd_style_3").attr("href", "javascript:setOddStyle(5);" + asianOddsChange);
+                    $("#asian_odd_style_4").html(titleAmerican);
+                    $("#asian_odd_style_4").attr("title", titleAmerican);
+                    $("#asian_odd_style_4").attr("href", "javascript:setOddStyle(0);" + asianOddsChange);
+                    break;
+                }
+        }
+    });
+}
+$(function() {
+    UserInfo.onLogin["global"] = function() {
+        $(document.body).removeClass("notlogged").addClass("loggedin");
+    };
+    UserInfo.onLogout["global"] = function() {
+        $(document.body).removeClass("loggedin").addClass("notlogged");
+    };
+});
+var ElementsToClick = new Object();
+
+function BindElementToClickFunction(ArrayToBeClick, buttonToClick) {
+    for (var tempNum in ArrayToBeClick) {
+        ElementsToClick[ArrayToBeClick[tempNum]] = buttonToClick;
+    }
+}
+$(document).ready(function() {
+    $('body').bind('keypress', function(event) {
+        return BindElementsToEvents(event);
+    });
+});
+
+function BindElementsToEvents(e) {
+    if (e.keyCode == 13) {
+        var ElementToClick = (e.srcElement ? e.srcElement.id : (e.target ? e.target.id : (e.originalTarget ? e.originalTarget.id : null)));
+        if (ElementToClick != null) {
+            if (ElementsToClick[ElementToClick]) {
+                $('#' + ElementsToClick[ElementToClick]).click();
+                cancelBubble(e);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+$(document).ready(function() {
+    if ($('body').html() == '') {
+        window.location.reload();
+    }
+});
+
+function getLength(list) {
+    var i = 0;
+    for (var item in list) {
+        i++;
+    }
+    return i;
+}
+
+function fbs_click(link, tWrite) {
+    u = link;
+    t = tWrite;
+    window.open('http://www.facebook.com/sharer.php?u=' + encodeURIComponent(u) + '&t=' + encodeURIComponent(t), 'sharerF', 'toolbar=0,status=0,width=626,height=436');
+    return false;
+}
+
+function twit_click(tWrite) {
+    t = tWrite;
+    window.open('http://twitter.com/home?status=' + encodeURIComponent(t), 'sharerT', 'toolbar=0,status=0,width=626,height=436');
+    return false;
+}
+
+function FocusPass() {
+    $("#PasswordFake").hide();
+    $("#Password").show();
+    $("#Password").focus();
+}
+
+function BlurPass() {}
+
+function makeMoneyOperation(dir) {
+    if (dir)
+        window.open("/withdrawal.aspx", "money", "height=600,width=750,status=no,directories=no,scrollbars=no,menubar=no,location=no");
+    else
+        window.open("/deposit.aspx", "money", "height=600,width=750,status=no,directories=no,scrollbars=no,menubar=no,location=no");
+}
+
+function showChatInvite() {
+    var chatPopup = new ChatPopUp();
+}
+
+function openChat() {
+    window.open("/chat.aspx", "chat", "height=600,width=750,status=no,directories=no,scrollbars=no,menubar=no,location=no");
+}
+
+function ChatPopUp() {
+    var __html = [];
+    var newLightBox = new LightBox();
+    newLightBox.TopHeader = "<a class='chatPopUp' href='javascript:openChat();'>" + $string("General").AdminChat + "</a>";
+    newLightBox.styles["display"] = ["block"];
+    newLightBox.AdditionalClassName = 'bg_light';
+    newLightBox.BuildContent = function() {
+        buildChatPopupView(__html);
+    }
+    newLightBox.Exec(__html);
+}
+
+function buildChatPopupView(__html) {
+    __html = "this is new line for testing";
+}
+$(function() {
+    UserInfo.onCommand["chatCommander"] = function(sender, data) {
+        if (data == "chat") showChatInvite();
+    }
+});
+
+function uploadStyle(url) {
+    var headID = document.getElementsByTagName("head")[0];
+    var array = headID.getElementsByTagName("link");
+    for (var i = 0; i < array.length; i++) {
+        var node = array[i];
+        if (node.href == url) return;
+    }
+    var cssNode = document.createElement('link');
+    cssNode.type = 'text/css';
+    cssNode.rel = 'stylesheet';
+    cssNode.href = url;
+    cssNode.media = 'screen';
+    headID.appendChild(cssNode);
+}
+
+function hasStyle(url) {
+    var headID = document.getElementsByTagName("head")[0];
+    var array = headID.getElementsByTagName("link");
+    for (var i = 0; i < array.length; i++) {
+        var node = array[i];
+        if (node.href == url) return true;
+    }
+    return false;
+}
+
+function LoadOutsideCSS(url) {
+    if (!hasStyle(url)) {
+        uploadStyle(url);
+    }
+}
+
+function displayError(errorMessage) {
+    $.jGrowl(errorMessage, {});
+}
+
+function OpenWindow(url) {
+    window.open(url);
+}
+
+function LoggedOrNotLinks(url1, url2) {
+    if (!UserInfo.current)
+        window.location.href = url2;
+    else
+        window.location.href = url1;
+}
+
+function verifyLoggedIn(url) {
+    if (!UserInfo.current) {
+        var vl = new VerifyLogin(url);
+    } else {
+        window.location.href = url;
+    }
+}
+var minuteRepeater = window.setInterval("CheckSession()", 60000);
+$(document).ready(function() {
+    $(document).mousemove(function(e) {
+        lastMouseMovedTime = new Date();
+    });
+});
+
+function CheckSession() {
+    var sessionTime = new Date();
+    if (sessionTime.getTime() - lastMouseMovedTime.getTime() > WHLSpecificConstants.SessionExpirationInterval) {
+        if (UserInfo) {
+            UserInfo.logout(true);
+        }
+    }
+}
+
+function SendToGoogleAnalytics(mainCategory, subCategory, subject, value) {
+    if (__gaTracker) {
+        __gaTracker('sbtech.send', mainCategory, subCategory, subject, value);
+        __gaTracker('send', mainCategory, subCategory, subject, value);
+    }
+}
+
+function TrackFormToGA(formName) {
+    $(':input').blur(function() {
+        if ($(this).val().length > 0) {
+            __gaTracker('sbtech.send', 'event', formName, 'completed', $(this).attr('name'));
+            __gaTracker('send', 'event', formName, 'completed', $(this).attr('name'));
+        } else {
+            __gaTracker('sbtech.send', 'event', formName, 'skipped', $(this).attr('name'));
+            __gaTracker('send', 'event', formName, 'skipped', $(this).attr('name'));
+        }
+    });
+}
+
+function TrackBettingSectionToGA(selector, category) {
+    $(selector).find("a").mouseup(function() {
+        var USERNAME = !UserInfo.current || UserInfo.current == null ? "Anonymous" : UserInfo.current.userName;
+        SendToGoogleAnalytics(category, "Unique Clicks", "User", USERNAME);
+    });
+}
+
+function getDataTime(d1) {
+    var d = new Date(d1);
+    currentTimeZone = currentTimeZone * 1;
+    if (currentTimeZone.toString().indexOf(".") == -1) {
+        d.setHours(d.getHours() + currentTimeZone);
+        return d;
+    }
+    var hoursDiff = parseInt(currentTimeZone);
+    var minutesDiff = (parseFloat(currentTimeZone) - hoursDiff) * 60;
+    d.setHours(d.getHours() + hoursDiff, d.getMinutes() + minutesDiff);
+    return d;
+}
+$(document).ready(function() {
+    var timeZoneVal = getQuerystring("timezone", null);
+    if (timeZoneVal && timeZoneVal !== "")
+        currentTimeZone = timeZoneVal;
+    else
+        currentTimeZone = getCookie(constTimeZoneCookie); if (typeof currentTimeZone === "undefined" || currentTimeZone === "") {
+        SetCurrentTimeZone($("#time").attr("name"));
+    }
+    setCookie(constTimeZoneCookie, currentTimeZone);
+    var newDate = SetServerdateByTimeZone();
+    LinkTimeZoneHTML();
+    LinkTimeZoneHTML_newSubheader();
+});
+var tzFlag = false;
+var tzInterval = window.setInterval(function() {
+    if (!tzFlag) {
+        $("#timestamp_arrow .opened").hide();
+    } else {
+        $("#timestamp_arrow .opened").show();
+    }
+}, 50);
+
+function LinkTimeZoneHTML() {
+    var timezoneMenu = new TimezoneMenu("#date_time_container");
+    timezoneMenu.init();
+    $("#ulGMT li a").click(function() {
+        SetCurrentTimeZone($(this).attr("name"));
+        $("#timestamp_arrow .timestamp_day").attr("name", $(this).attr("name"));
+        SetServerdateByTimeZone();
+        setTimeZone();
+        tzFlag = false;
+    });
+}
+
+function LinkTimeZoneHTML_newSubheader() {
+    var intInterval;
+    $("#time, #current-time").mouseover(function() {
+        intInterval = window.setInterval(updateGmtListTime_newSubheader, 1000);
+        updateGmtListTime_newSubheader();
+    });
+    $("#current-time").mouseout(function() {
+        intInterval = window.clearInterval(intInterval);
+    });
+    $("#current-time .dropdownInner a").click(function() {
+        SetCurrentTimeZone($(this).attr("name"));
+        $("#time").attr("name", $(this).attr("name"));
+        SetServerdateByTimeZone();
+        setTimeZone();
+    });
+}
+
+function SetServerdateByTimeZone() {
+    if (!isNaN(currentTimeZone * 1)) {
+        var newDate = new Date(serverdate);
+        if (currentTimeZone.toString().indexOf(".") == -1) {
+            newDate.setHours(newDate.getHours() + currentTimeZone * 1);
+            return newDate;
+        }
+        var hoursDiff = parseInt(currentTimeZone);
+        var minutesDiff = (parseFloat(currentTimeZone) - hoursDiff) * 60;
+        newDate.setHours(newDate.getHours() + hoursDiff, newDate.getMinutes() + minutesDiff);
+        return newDate;
+    }
+    return serverdate;
+}
+
+function SetCurrentTimeZone(updatedTimeZone) {
+    if (typeof updatedTimeZone !== "undefined" && updatedTimeZone.length > 0) {
+        currentTimeZone = updatedTimeZone;
+    }
+}
+
+function setTimeZone() {
+    executeEvents(setTimeZone.listeners, null, currentTimeZone);
+    setCookie(constTimeZoneCookie, currentTimeZone);
+}
+setTimeZone.listeners = [];
+
+function updateGmtListTime() {
+    $("#ulGMT li a").each(function(index) {
+        var value = $(this).attr("name");
+        var tempDate = new Date(serverdate);
+        tempDate.setHours(tempDate.getHours() + value * 1);
+        $(this).html(tempDate.toStringEx("HH:mm:ss") + " (GMT" + (value != 0 ? (" " + value) : "") + ")");
+    });
+}
+
+function updateGmtListTime_newSubheader() {
+    $("#current-time .dropdownInner a").each(function(index) {
+        var value = $(this).attr("name");
+        var tempDate = new Date(serverdate);
+        tempDate.setHours(tempDate.getHours() + value * 1);
+        $(this).html(tempDate.toStringEx("HH:mm:ss") + " (GMT" + (value != 0 ? (" " + value) : "") + ")");
+    });
+}
+
+function getQuerystring(key, default_) {
+    if (default_ == null) default_ = "";
+    key = key.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
+    var regex = new RegExp("[\\?&]" + key + "=([^&#]*)");
+    var qs = regex.exec(window.location.href);
+    if (qs == null)
+        return default_;
+    else
+        return qs[1];
+}
+
+function getIFrameQuerystring(key, default_, iframeSrc) {
+    if (default_ == null) default_ = "";
+    key = key.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
+    var regex = new RegExp("[\\?&]" + key + "=([^&#]*)");
+    var qs = regex.exec(iframeSrc);
+    if (qs == null)
+        return default_;
+    else
+        return qs[1];
+}
+
+function printVersion() {
+    var text = $("html").html();
+    var winobj = window.open('/printPage.aspx', 'window name');
+}
+
+function SetCasinoGamesMode(param1, param2) {
+    TicketID = param1;
+    CTXMGameMode = param2;
+}
+
+function RunCasinoFromNonCasinoPage(CasinoObjectCode, CasinoProviderID, IsLiveDealerGame, IsSeamlessGame) {
+    if (!IsSeamlessGame)
+        IsSeamlessGame = 0;
+    if (!CasinoProviderID) {
+        AddEventTracking(CasinoObjectCode, 5, 1, __gaTracker);
+        var winObj = window.open("/CTXMCasinoPage.aspx?gamecode=" + CasinoObjectCode + "&isGamePlay=" + IsSeamlessGame, "CasinoGamesMode", "left=100,top=50,width=900,height=755,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no");
+    } else {
+        if (IsLiveDealerGame) {
+            AddEventTracking(CasinoObjectCode, 6, 1, __gaTracker);
+            var winObj = window.open("/CasinoPageMode.aspx?gamecode=" + CasinoObjectCode + "&providerID=" + CasinoProviderID + "&isLiveDealerGame=" + IsLiveDealerGame + "&isGamePlay=" + IsSeamlessGame, "CasinoGamesMode", "left=100,top=50,width=900,height=755,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no");
+        } else {
+            AddEventTracking(CasinoObjectCode, CasinoProviderID, 1, __gaTracker);
+            var winObj = window.open("/CasinoPageMode.aspx?gamecode=" + CasinoObjectCode + "&providerID=" + CasinoProviderID + "&isLiveDealerGame=0" + "&isGamePlay=" + IsSeamlessGame, "CasinoGamesMode", "left=100,top=50,width=900,height=755,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no");
+        }
+    }
+}
+
+function RunGame(GameCode) {
+    if (GameCode < 100) {
+        var _gameID = parseInt(GameCode);
+        var _w = 830;
+        var _h = 590;
+        if (GameCode == 13) {
+            _h = 635;
+            _w = 950;
+        }
+        if (GameCode == 10 || GameCode == 8) {
+            _h = 500;
+        }
+        var winObj = window.open("/GamesPageMode.aspx?GameID=" + _gameID, "10BetGames", "left=100,top=50,width=" + _w + ",height=" + _h + ",toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no");
+    }
+}
+
+function AddEventTracking(serverGameID, providerID, isGamePlay, __gaTracker) {
+    if (!isGamePlay)
+        isGamePlay = 0;
+    var isGamePlayParameter = "";
+    if (isGamePlay)
+        isGamePlayParameter = " - Games";
+    providerID = parseInt(providerID);
+    var providerName = "";
+    switch (providerID) {
+        case 5:
+            providerName = "CTXM";
+            break;
+        case 6:
+            providerName = "Microgaming";
+            break;
+        case 7:
+            providerName = "SheriffGaming";
+            break;
+        default:
+            return false;
+    }
+    providerName += isGamePlayParameter;
+    __gaTracker('sbtech.send', 'event', providerName, serverGameID, window.location.href);
+    __gaTracker('send', 'event', providerName, serverGameID, window.location.href);
+}
+
+function PreparePagesPopupMode() {
+    if ($('#whl_popup').length == 0) {
+        $('body').append('<div id="whl_bkg" onclick="return ClosePopup()" style="top:0;left:0;display:none;position:absolute;width:100%;height:100%;background:#000000;z-index:9000;"></div>');
+        $('body').append('<div id="whl_popup" style="display:none;position:fixed;z-index:10000"></div>');
+    }
+}
+
+function ShowInPopupMode(url, width, height) {
+    if (window.location.href.indexOf('popupMode') != (-1)) {
+        ShowPopupFromPopupMode(url);
+        return;
+    } else {
+        PreparePagesPopupMode();
+    }
+    $('#whl_bkg').height($('body').height());
+    if (url.indexOf('popupMode') == (-1)) {
+        if (url.indexOf('?') == (-1)) {
+            url += '?';
+        } else {
+            url += '&';
+        };
+        url += 'popupMode=true';
+    }
+    if (!width) {
+        width = 1021;
+    }
+    if (!height) {
+        if (window.innerHeight) {
+            height = window.innerHeight - 160;
+        } else {
+            height = document.documentElement.clientHeight - 160;
+        }
+    }
+    $("#whl_bkg").css({
+        "opacity": "0.7"
+    });
+    $('body').css('overflow', 'hidden');
+    $("#whl_bkg").fadeIn("slow");
+    $('#whl_popup').html('<div class="close_popup_top" style="display:none;"><a href="javascript:ClosePopup()"></div>');
+    $('#whl_popup').append('<iframe style="border:0px;width:' + width + 'px;height:' + height + 'px"src="' + url + '"></iframe>');
+    $("#whl_popup").width(width);
+    var top = '10%';
+    var left = $(window).width() / 2 - $("#whl_popup").width() / 2;
+    if (left < 0) left = 0;
+    $("#whl_popup").css('top', top);
+    $("#whl_popup").css('left', left);
+    $("#whl_popup").fadeIn("slow");
+    ($('#whl_popup iframe').length > 0) {
+        $(".close_popup_top").css("display", "block");
+    }
+}
+
+function ShowPopupFromPopupMode(url) {
+    ($('#whl_popup iframe').length > 0) {
+        $("#whl_popup iframe").attr("src", url);
+    }
+}
+
+function ClosePopup() {
+    $('#whl_bkg').empty();
+    $('#whl_bkg').css("display", "none");
+    $('#whl_popup').empty();
+    $('#whl_popup').css("display", "none");
+    $('body').css('overflow', '');
+}
+
+function initOddStyle(style) {
+    style = style * 1;
+    if (style == currentOddStyle) return;
+    if (isNaN(style)) style = defaultOddStyle;
+    currentOddStyle = style;
+    switch (style) {
+        case OddStyle.AMERICAN:
+            {
+                constBetFormat = constBetFormatAmerican;
+                $("#odds_style3 .closed .current a").html('<a name="american">' + $string("Odds").American + ': (-125)' + '</a>');
+                break;
+            }
+        case OddStyle.EUROPEAN:
+            {
+                constBetFormat = constBetFormatEuropean;
+                $("#odds_style3 .closed .current a").html('<a name="decimal">' + $string("Odds").European + ': (1.80)' + '</a>');
+                break;
+            }
+        case OddStyle.FRACTIONAL:
+            {
+                constBetFormat = "";
+                $("#odds_style3 .closed .current a").html('<a name="fractions">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+                break;
+            }
+        case OddStyle.HONGKONG:
+            {
+                constBetFormat = constBetFormatHongkong;
+                $("#odds_style3 .closed .current a").html('<a name="hongkong" href="javascript:setOddStyle(3)">' + $string("Odds").HongKong + ': (0.80)' + '</a>');
+                break;
+            }
+        case OddStyle.MALAY:
+            {
+                constBetFormat = constBetFormatMalay;
+                $("#odds_style3 .closed .current a").html('<a name="malaysian" href="javascript:setOddStyle(4)">' + $string("Odds").Malaysian + ': (0.80)' + '</a>');
+                break;
+            }
+        case OddStyle.INDO:
+            {
+                constBetFormat = constBetFormatIndo;
+                $("#odds_style3 .closed .current a").html('<a name="indonesian" href="javascript:setOddStyle(5)">' + $string("Odds").Indonesian + ': (-1.25)' + '</a>');
+                break;
+            }
+        case OddStyle.HONGKONG:
+            {
+                constBetFormat = constBetFormatHongkong;
+                break;
+            }
+        default:
+            {
+                var asianOdds = document.getElementById("asian_odd_style_current");
+                if (asianOdds != null) {
+                    currentOddStyle = OddStyle.HONGKONG;
+                    $("#odds_style3 .closed .current a").html('<a name="hongkong" href="javascript:setOddStyle(3)">' + $string("Odds").HongKong + ': (0.80)' + '</a>');
+                } else {
+                    currentOddStyle = OddStyle.EUROPEAN;
+                    $("#odds_style3 .closed .current a").html('<a name="decimal" href="javascript:setOddStyle(1)">' + $string("Odds").European + ': (1.80)' + '</a>');
+                }
+                constBetFormat = constBetFormatEuropean;
+                break;
+            }
+    }
+    BuildOddsStyleDDL(style);
+    SetNewOddStyleCurrentTitle(style);
+}
+
+function SetNewOddStyleCurrentTitle(style) {
+    var titleAmerican = $string("Odds").American + ": (-125)";
+    var titleFractnal = $string("Odds").Fractional + ": (1/2)";
+    var titleEuropnal = $string("Odds").European + ": (1.80)";
+    var titleHongKong = $string("Odds").HongKong + ": (0.80)";
+    var titleMalay = $string("Odds").Malaysian + ": (0.80)";
+    var titleIndo = $string("Odds").Indonesian + ": (-1.25)";
+    switch (style) {
+        case OddStyle.AMERICAN:
+            {
+                $("#odd_style_current").html(titleAmerican);
+                break;
+            }
+        case OddStyle.FRACTIONAL:
+            {
+                $("#odd_style_current").html(titleFractnal);
+                break;
+            }
+        case OddStyle.EUROPEAN:
+        default:
+            {
+                $("#odd_style_current").html(titleEuropnal);
+                break;
+            }
+    }
+    switch (style) {
+        case OddStyle.AMERICAN:
+            {
+                $("#asian_odd_style_current").html(titleAmerican);
+                break;
+            }
+        case OddStyle.EUROPEAN:
+            {
+                $("#asian_odd_style_current").html(titleEuropnal);
+                break;
+            }
+        case OddStyle.MALAY:
+            {
+                $("#asian_odd_style_current").html(titleMalay);
+                break;
+            }
+        case OddStyle.INDO:
+            {
+                $("#asian_odd_style_current").html(titleIndo);
+                break;
+            }
+        case OddStyle.HONGKONG:
+        default:
+            {
+                $("#asian_odd_style_current").html(titleHongKong);
+                break;
+            }
+    }
+}
+
+function BuildOddsStyleDDL(style) {
+    switch (style) {
+        case 0:
+            {
+                $("#odds_style3 .opened li.odd_1").html('<a name="fractions" href="javascript:setOddStyle(2)">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+                $("#odds_style3 .opened li.odd_2").html('<a name="decimal" href="javascript:setOddStyle(1)">' + $string("Odds").European + ': (1.80)' + '</a>');
+                break;
+            }
+        case 1:
+            {
+                $("#odds_style3 .opened li.odd_1").html('<a name="american" href="javascript:setOddStyle(0)">' + $string("Odds").American + ': (-125)' + '</a>');
+                $("#odds_style3 .opened li.odd_2").html('<a name="fractions" href="javascript:setOddStyle(2)">' + $string("Odds").Fractional + ': (1/2)' + '</a>');
+                break;
+            }
+        case 2:
+            {
+                $("#odds_style3 .opened li.odd_1").html('<a name="decimal" href="javascript:setOddStyle(1)">' + $string("Odds").European + ': (1.80)' + '</a>');
+                $("#odds_style3 .opened li.odd_2").html('<a name="american" href="javascript:setOddStyle(0)">' + $string("Odds").American + ': (-125)' + '</a>');
+                break;
+            }
+        default:
+            {
+                break;
+            }
+    }
+    $("#odds_style3 .opened").hide();
+}
+
+function SetHeaderLogo(newLogo) {
+    if (newLogo.length > 0) {
+        $("#header h1").css("background-image", "url(" + newLogo + ")");
+    }
+}
+$(document).ready(function() {
+    CurrentUrl = document.location.href;
+    if (CurrentUrl.indexOf('livedealer') != -1) {
+        CurrentPage = "livedealer";
+    } else if (CurrentUrl.indexOf('casino') != -1) {
+        isCasinoPage = true;
+        CurrentPage = "casino";
+    } else if (CurrentUrl.indexOf('sports') != -1) {
+        CurrentPage = "sports";
+    } else if (CurrentUrl.indexOf('games') != -1) {
+        CurrentPage = "games";
+    } else if (CurrentUrl.indexOf('live-betting') != -1) {
+        CurrentPage = "live-betting";
+    } else {
+        CurrentPage = "sports";
+    }
+});
+
+function URLContains(word) {
+    var url = window.location.href.toLowerCase();
+    var word = word.toLowerCase();
+    return url.indexOf(word) == -1 ? false : true;
+}
+
+function getUrlWithoutQueryStrings() {
+    return document.location.href.slice(0, document.location.href.lastIndexOf('?'));
+}
+
+function getBranchFromUrl() {
+    var branche = CurrentUrl.slice(0, CurrentUrl.lastIndexOf('?') - 1);
+    branche = branche.slice(branche.lastIndexOf('/') + 1, branche.length);
+    return branche;
+}
+$(document).ready(function() {
+    var url = location.protocol + '//' + location.host + location.pathname;
+    if ((url.indexOf('live-betting') != -1) || (url.indexOf("advlivebetting") != -1)) {
+        isLiveBettingPage = true;
+    } else {
+        isLiveBettingPage = false;
+    }
+});
+
+function IsWebStorageSupported() {
+    if (typeof(Storage) !== "undefined") {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+function RemoveFromSessionStorage(item) {
+    if (!IsWebStorageSupported())
+        return;
+    if (JSON.parse(sessionStorage.getItem(item)))
+        sessionStorage.removeItem(item);
+}
+
+function GetItemArrayFromWebStorage(item) {
+    if (!IsWebStorageSupported())
+        return;
+    var itemArray = [];
+    if (JSON.parse(sessionStorage.getItem(item)))
+        itemArray = JSON.parse(sessionStorage.getItem(item));
+    return itemArray;
+}
+
+function AddItemToLocalStorage(item, data) {
+    if (!IsWebStorageSupported())
+        return;
+    localStorage.setItem(item, JSON.stringify(data));
+}
+
+function RemoveItemFromLocalStorage(item) {
+    if (!IsWebStorageSupported())
+        return;
+    if (JSON.parse(localStorage.getItem(item)))
+        localStorage.removeItem(item);
+}
+
+function GetItemArrayFromLocalStorage(item) {
+        if (!IsWebStorageSupported())
+            return;
+        var itemArray = [];
+        if (JSON.parse(localStorage.getItem(item)))
+            itemArray = JSON.parse(localStorage.getItem(item));
+        return itemArray;
+    }
+    (cookies = {
+        data: [],
+        init: function() {
+            this.data = document.cookie.split(";");
+        },
+        set: function(key, value, expiredays) {
+            var exdate = new Date();
+            if (expiredays)
+                exdate.setDate(exdate.getDate() + expiredays);
+            else
+                exdate.setDate(exdate.getDate() + 365);
+            var exprString = "expires=" + exdate.toGMTString();
+            document.cookie = key + "=" + escape(value) + ";" + exprString + ";";
+        },
+        get: function(key) {
+            for (var i = 0; i < this.data.length; i++) {
+                var c = this.data[i];
+                var cName = c.split("=")[0].trim();
+                if (key == cName)
+                    return c;
+            }
+            return undefined;
+        },
+        getValue: function(key) {
+            var c = this.get(key);
+            if (c != undefined)
+                return c.split("=")[1]
+            else
+                return undefined;
+        }
+    }).init();
+
+function ShowOpenBetsLightBox() {
+    jsRequire("/JSComponents/Pages/OpenBetsLightBox.js");
+    if (!UserInfo.current) {
+        console.log('Please login to see the open bets window');
+        return;
+    }
+    new OpenBetsLightBox();
+}
+
+function OpenStatsMID(masterEventID) {
+    if (masterEventID == null) return;
+    var url = window.location.origin + "/Client/XMLFeed/EventStatistics.ashx?mid=" + masterEventID;
+    var feat = "left=100,top=50,width=1070,height=600,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=yes,resizable=no,copyhistory=no";
+    var wind = window.open(url, "Statistics", feat);
+    if (wind == null)
+        alert("Please disable popup blockers to allow statistics window to open.");
+}
+
+function ShowInsuficientBalancePopup() {
+    jsRequire("/JSComponents/Data/UserInfo.js");
+    jsRequire('/JSComponents/Pages/CasinoInsufficientBalanceInfo.js');
+    if (!CurrentPage || CurrentPage == "") return;
+    switch (CurrentPage) {
+        case "casino":
+            if (parseFloat(UserInfo.current.CasinoBalance) < 1 && parseFloat(UserInfo.current.CasinoBonusBalance) < 1) {
+                UserInfo.getSportsbookBonusAmounts(function() {
+                    var bi = new CasinoInsufficientBalanceInfo(UserInfo.current.Balance, UserInfo.current.CasinoBalance, UserInfo.current.SportsbookBonusBalance, UserInfo.current.CasinoBonusBalance, UserInfo.current.SportsbookOpenBonusBalance, UserInfo.current.FirstName, true);
+                    setCookie(CasinoInsufficientBalanceShownCookie, 1);
+                });
+            }
+            break;
+        case "sports":
+            if (parseFloat(UserInfo.current.Balance) < 1) {
+                UserInfo.getSportsbookBonusAmounts(function() {
+                    var bi = new CasinoInsufficientBalanceInfo(UserInfo.current.Balance, UserInfo.current.CasinoBalance, UserInfo.current.SportsbookBonusBalance, UserInfo.current.CasinoBonusBalance, UserInfo.current.SportsbookOpenBonusBalance, UserInfo.current.FirstName, false);
+                    setCookie(SportsInsufficientBalanceShownCookie, 1);
+                });
+            }
+            break;
+        case "games":
+            if (parseFloat(UserInfo.current.Balance) < 1) {
+                UserInfo.getSportsbookBonusAmounts(function() {
+                    var bi = new CasinoInsufficientBalanceInfo(UserInfo.current.Balance, UserInfo.current.CasinoBalance, UserInfo.current.SportsbookBonusBalance, UserInfo.current.CasinoBonusBalance, UserInfo.current.SportsbookOpenBonusBalance, UserInfo.current.FirstName, false);
+                    setCookie(GamesInsufficientBalanceShownCookie, 1);
+                });
+            }
+            break;
+        case "livedealer":
+            if (parseFloat(ref.Balance) < 1) {
+                UserInfo.getSportsbookBonusAmounts(function() {
+                    var bi = new CasinoInsufficientBalanceInfo(UserInfo.current.Balance, UserInfo.current.CasinoBalance, UserInfo.current.SportsbookBonusBalance, UserInfo.current.CasinoBonusBalance, UserInfo.current.SportsbookOpenBonusBalance, UserInfo.current.FirstName, false);
+                    setCookie(LivedealerInsufficientBalanceShownCookie, 1);
+                });
+            }
+            break;
+    }
+}
+
+function ToggleHTMLContent(id) {
+    $('#' + id).toggle(0);
+}
+
+function openRegistrationForm(registerFrom) {
+    if (typeof(useOldRegistration) != "undefined" && useOldRegistration || typeof(modalRegistrationBlockID) == "undefined" || modalRegistrationBlockID == -1) {
+        window.location = typeof(OldRegisterPage) != "undefined" ? OldRegisterPage : "/registration/";
+        return;
+    }
+    jsRequire('/JSComponents/Pages/ModalRegistration.js');
+    jsRequire("/JSComponents/Data/Arrays.js");
+    if (ModalRegistration.curr) {
+        return;
+    }
+    var modalRegType = registerFrom;
+    if (!(modalRegType && Array.getValues(ModalRegistrationType).indexOf(modalRegType) != -1)) {
+        var location = window.location.pathname;
+        modalRegType = ModalRegistrationType.Sportsbook;
+        if (location.indexOf("/sports") == 0) {
+            modalRegType = ModalRegistrationType.Sportsbook;
+        } else if (location.indexOf("/casino/livedealer") == 0) {
+            modalRegType = ModalRegistrationType.LiveDealer;
+        } else if (location.indexOf("/casino") == 0) {
+            modalRegType = ModalRegistrationType.Casino;
+        } else if (location.indexOf("/live-betting") == 0) {
+            modalRegType = ModalRegistrationType.Sportsbook;
+        } else if (location.indexOf("/advlivebetting") == 0) {
+            modalRegType = ModalRegistrationType.Sportsbook;
+        } else if (location.indexOf("/games") == 0) {
+            modalRegType = ModalRegistrationType.Games;
+        }
+    }
+    new ModalRegistration(modalRegType, modalRegistrationBlockID);
+}
+
+function getEachWayString(placeTerms, oddsTerms, full) {
+    if (typeof(placeTerms) == "undefined" || typeof(oddsTerms) == "undefined" || placeTerms <= 0 || oddsTerms <= 0) return "";
+    var pt = placeTerms;
+    var mpt = 0;
+    var mainString = "";
+    var fullString = "";
+    if (full) {
+        fullString = $string("General").EachWay + " " + "1/" + oddsTerms.toString() + " ";
+    } else {
+        fullString = $string("General").EachWayTag + " " + "1/" + oddsTerms.toString() + " ";
+    }
+    for (var i = 1; i <= pt; i++) {
+        if (i == 1) {
+            mainString = pt - (pt - 1);
+            continue;
+        }
+        mpt = pt - (pt - i);
+        if (mpt > 0) mainString += "-" + mpt.toString();
+    }
+    fullString = fullString + mainString;
+    return fullString;
+}
+
+function checkLineTypeIsSP(LineTypeID) {
+    switch (LineTypeID) {
+        case 24:
+        case 25:
+        case 26:
+        case 28:
+            return true;
+        default:
+            return false;
+    }
+}
+$(function() {
+    UserInfo.onCommand["JSCommandsForSuccesfulDeposiOrtWithdraw"] = function(sender, data) {
+        if ("functionCall" in data) {
+            if (data.functionCall == "successfulDepositEvent") {
+                AddPixelsForSuccessfulDepositOrWithdraw(data.MessageParams);
+            }
+        }
+    }
+})
+
+function AddPixelsForSuccessfulDepositOrWithdraw(messageParams) {
+    var pixelIds = getCookie("pixelTrackingCookie");
+    PageMethods.GetPixelsByIdWithParams(pixelIds, messageParams, function(res) {
+        var result = eval(res);
+        if (result !== "-1" || result !== "")
+            for (var i in result) {
+                addPixel(result[i]);
+            }
+    })
+}
+
+function addPixel(url) {
+    $("#container").append("<img src=" + url + " height='0' with='0'></img>");
+}
+jsRequire("/JSComponents/Global.ext.js");
+
+
+function shouldRound(eventType, linetype) {
+    if (linetype && linetype >= 18 && linetype <= 29)
+        return false;
+    return !(linetype && (eventType == 0 || eventType == 39 || eventType == 1) && (linetype == 2 || linetype == 3));
+}
+
+
+
+
+
+
+
+
+
+[u'Astoria Walldorf V Hannover']
+[7573096, None, [[13228502, [92558850, 972, 92558853, 166, 92558854, -184], [92558851, 1, -130, 92558855, -$
+01], [92558852, 1.75, 102, 92558856, -144], 0, None, 1, 1, 1]], 3]
+

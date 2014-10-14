@@ -1,0 +1,114 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#we have a problem in that the dates are the abbreviated spanish months
+# e.g. april is 'abr'. Need to set the local so datetime can deal
+#need to get support on ubuntu first: sudo locale-gen es_ES.UTF-8
+#now datetime should be set to support spanish date months.
+import locale
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class SportiumSpider(Spider):
+    name = "Sportium"
+    allowed_domains = ["sportium.es"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='http://sports.sportium.es/es/football',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+        sel = Selector(response)
+
+        league_links = sel.xpath('//ul[@class="hierarchy"]//li[@class="expander expander-collapsed sport-FOOT"]/ul[@class="expander-content"]//li/ul[@class="expander-content"]//li/a/@href').extract()
+
+        with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+            print >>lfile, '*'*100
+            for link in league_links: print >>lfile, link
+            print >>lfile, '*'*100
+
+        for link in league_links:
+            #print link
+            yield Request('http://sports.sportium.es'+link, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])        
+
+        eventSelection = sel.xpath('//table[@class="coupon coupon-horizontal "]/tbody//tr')
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+
+               # Get eventName.              
+               teams = event.xpath('td[@class="seln "]/div/button/@title').extract()
+               if len(teams) == 2:
+                   item['eventName'] = [teams[0]+' V '+teams[1]]
+
+
+               #dateand time
+               item['eventTime'] = event.xpath('td[@class="time "]/div/span[@class="time"]/text()').extract()
+
+               #fmt is '29 Mayo'
+               date = event.xpath('td[@class="time "]/div/span[@class="date"]/text()').extract()
+               # Format date as desired.
+               if not date:
+                    #assume today (as often bookies miss date if event today)
+                    date = [today.strftime('%m %d')]
+               elif  "Tomorrow" in date:
+                    tmoz = today + datetime.timedelta(days=1)
+                    date = [tmoz.strftime('%m %d')]
+               elif  "Today" in date:
+                    date = [today.strftime('%m %d')]
+               elif date != [] and date != [u'']:
+                    # Standarise formatting frp, %d %b (09 Mar) to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        old_loc = locale.getlocale(locale.LC_TIME)
+                        locale.setlocale(locale.LC_ALL, 'es_ES.utf8')#change to spanish
+                        date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+                        locale.setlocale(locale.LC_TIME, old_loc) #set back
+                    except ValueError as e:
+                        try:
+                            #sometimes full month %B
+                            locale.setlocale(locale.LC_ALL, 'es_ES.utf8')#change to spanish
+                            date = [datetime.datetime.strptime(date[0], '%d %B').strftime('%m %d')]
+                            locale.setlocale(locale.LC_TIME, old_loc) #set back
+                        except ValueError as e:
+                            print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                            print '\033[31m [%s ERROR:] Locale check: %s \033[0m' % (self.name, [datetime.datetime.strptime('2014-05-05', '%Y-%m-%d').strftime('%A, %d %B %Y')])
+                            print "[ERROR %s]: \033[7m\033[31m Date dump: %s. SKIP." % (self.name, date)
+                            continue
+
+               item['eventDate'] = date
+
+               # Get prices.
+               item['odd1'] = event.xpath('td[3][@class="seln "]/div/button/span/span[@class="price dec"]/text()').extract()
+               item['odd3'] = event.xpath('td[4][@class="seln seln_sort-D"]/div/button/span/span[@class="price dec"]/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[5][@class="seln "]/div/button/span/span[@class="price dec"]/text()').extract()
+                
+               if not (item['odd1'] or item['odd2'] or item['odd3']) and item['eventName']:
+                   #for events on the day.
+                   item['odd1'] = event.xpath('td[4][@class="seln "]/div/button/span/span[@class="price dec"]/text()').extract()
+                   item['odd3'] = event.xpath('td[5][@class="seln seln_sort-D"]/div/button/span/span[@class="price dec"]/text()').extract() #our conv is odd3 is draw
+                   item['odd2'] = event.xpath('td[6][@class="seln "]/div/button/span/span[@class="price dec"]/text()').extract()
+               
+               items.append(item)  #only append if at least one odd found   
+
+        return items
+

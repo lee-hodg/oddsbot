@@ -1,0 +1,187 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request,FormRequest
+import datetime
+import json
+import re
+import os
+LOG_DIR = '/home/lee/oddScr/logs'
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#
+# Page load loads 'Kambi betting client'
+# ,which is a swf. But we can still replicate
+# its requests to API to get the raw JSON data.
+#
+
+class Bet188Spider(Spider):
+    name = "Bet188"
+    allowed_domains = ["188bet.co.uk"]
+    
+    #Sets ASP.NET_SessionId, sscd2 cookies
+    #The response is basically the nav bar at top, footer,
+    #css and some js vars.
+    start_urls=['http://www.188bet.co.uk/en-gb/sports']
+   
+    def parse(self, response):
+        sel = Selector(response)
+
+        #The next request. This sets an extra two empty
+        #cookies, mc, HighlightedSport, and adds 
+        # ssc.SB with same val as sscd2
+
+        #Looks like content is loaded from iframe:
+        #This has the empty <div id="tab-Menu" class=""> div, and some js
+        #that looks like it will fill it.
+        #Other than this there are some <!--templates--> 'textareas' which look like they may
+        #parse some variables from json, and build the HTML to go in the rel areas. 
+        # e.g.  <!--Sport Menu--> 
+
+        #Lets load this to at the very least get some more cookies.
+       
+        base_url="http://sb.188bet.co.uk/en-gb/sports?theme=black&q=&country=GB&currency=GBP&tzoff=-240"
+        headers= { 'Referer': 'http://www.188bet.co.uk/en-gb/sports'}
+    
+        yield Request(url=base_url, headers=headers, callback=self.post_parse)
+
+
+    def post_parse(self,response):
+
+        #where are the __utm(a,b,c,z) and timezone cookies getting set?
+        # cURL works without these anyway
+        #Looks like actual data is coming from POSTs to this API
+        base_url= 'http://sb.188bet.co.uk/en-gb/Service/CentralService?GetData'
+        headers ={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'Referer': 'http://sb.188bet.co.uk/en-gb/sports?theme=black&q=&country=GB&currency=GBP&tzoff=-240',}
+
+        #seems to work only if I leave reqUrl encoded?
+        formdata = {'IsFirstLoad' : 'true' , 
+                   'VersionL' : '-1' , 'VersionU' : '0' , 'VersionS' : '-1' , 'VersionF' : '-1' , 'VersionH' : '0' ,
+                   'IsEventMenu' : 'false' , 
+                   'SportID' : '-1' , 
+                   'CompetitionID' : '-1' , 
+                   'reqUrl' : '%2Fen-gb%2Fsports%3Ftheme%3Dblack%26q%3D%26country%3DGB%26currency%3DGBP%26tzoff%3D-240' ,
+                   'oIsInplayAll' : 'false' , 
+                   'oIsFirstLoad' : 'true' , 
+                   'oOddsType' : '0' , 
+                   'oPageNo' : '0'}
+
+        #Need to make a post req.
+        yield FormRequest(url=base_url, formdata=formdata, headers=headers, callback=self.pre_leagues)
+
+    def pre_leages(self, response):
+
+        #Get JSON resp
+        jResp=json.loads(response.body)
+        #Football info?
+        footData = jResp['tpd']['favsport'][0]
+
+        #Looks like from the lpd>ips>ismd tree I can get some eventNames
+        #e.g. jResp['lpd']['ips']['ismd'][0]['puc'][0]['ces']
+        # also lpd>ssm>puc
+        # Not yet sure whether I need this data or just to make the req for full leagues
+
+        #This should be the money request for league data and comp ids:
+        #Why is it not giving this?
+        base_url = 'http://sb.188bet.co.uk/en-gb/Service/CentralService?GetData'
+        headers ={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'Referer': 'http://sb.188bet.co.uk/en-gb/sports/1/select-competition/default',}
+
+        formdata ={ 'IsFirstLoad=true&VersionL=6286&VersionU=6286&VersionS=6286&VersionF=2591&VersionH=1%3A71775%2C3%3A4145%2C2%3A2389%2C4%3A310%2C26%3A62&VersionT=2591&IsEventMenu=false&SportID=-1&CompetitionID=&reqUrl=%2Fen-gb%2Fsports%2F1%2Fselect-competition%2Fdefault&oIsInplayAll=false&oIsFirstLoad=true&oOddsType=0&oPageNo=0'}
+
+        oldformdata= { 'IsFirstLoad' : 'true' ,
+                    'VersionL' : '7228' , 'VersionU' : '7228' , 'VersionS' : '7228' , 'VersionF' : '2928' , 
+                    'VersionH' : '1%3A71471%2C3%3A4141%2C2%3A2344%2C4%3A290%2C26%3A62' , 'VersionT' : '2928' ,
+                    'IsEventMenu' : 'false' , 'SportID' : '-1' , 'CompetitionID' : '' , 
+                    'reqUrl' : '%2Fen-gb%2Fsports%2F1%2Fselect-competition%2Fdefault' , 
+                    'oIsInplayAll' : 'false' , 'oIsFirstLoad' : 'true' , 'oOddsType' : '0' , 'oPageNo' : '0'}
+
+
+        #Need to make a post req.
+        yield FormRequest(url=base_url, formdata=formdata, headers=headers, callback=self.pre_leagues)
+
+
+    def parse_leagues(self,response):
+
+        #extract the needed params from the JSON response
+        jResp=json.loads(response.body)
+        groups = jResp['group']['groups']
+        for g in groups:
+            if g['name'] == 'Football': football = g
+        if football:
+            footballGroups = football['groups']
+
+        #build list of country Ids, needed to call API.
+        IdsList=[]
+        for country in football['groups']:
+            IdsList.append(country['id'])
+
+
+        GETstr='?cat=1295&market=gb&lang=en_GB&range_size=100&range_start=0&suppress_response_codes&channel_id=1' 
+        headers = {'Referer': 'https://c1-static.kambi.com/sb-bettingclient/client/ub/1.55.0.5/bettingclient-shell.swf'}
+        for id in IdsList:
+            base_url = 'https://api.kambi.com/offering/api/v2/ub/betoffer/group/'+str(id)+'.json'
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])             
+
+        jResp=json.loads(response.body)
+
+        try:
+            jsonEventsData = jResp['events']
+            jsonOddsData = jResp['betoffers']
+        except KeyError as e: 
+            print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Error response or 404? \033[0m" % (self.name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,jResp)
+            return EventItem(odd1=[],odd2=[],odd3=[], eventName=[], eventDate=[],eventTime=[])
+
+        items = []
+        for jsonEvent in jsonEventsData:
+            item = EventItem()
+     
+            item['eventName'] =[]
+            homeName = jsonEvent['homeName']
+            awayName = jsonEvent['awayName']
+            if homeName and awayName:
+                item['eventName'] = [homeName + ' V ' + awayName]
+
+            dateandtime = jsonEvent['start'] #2014-03-23T17:30Z
+
+        
+            item['odd1'] = []
+            item['odd3'] = []
+            item['odd2'] = []
+            for jsonOdd in jsonOddsData:
+                if jsonEvent['id'] == jsonOdd['eventId']:
+                    for outcome in jsonOdd['outcomes']:
+                        if outcome['type'] == 'OT_ONE':
+                            #home
+                            item['odd1'] = [outcome['oddsFractional']]
+                        elif outcome['type'] == 'OT_CROSS':
+                            #draw
+                            item['odd3'] = [outcome['oddsFractional']]
+                        elif outcome['type'] == 'OT_TWO':
+                            #home
+                            item['odd2'] = [outcome['oddsFractional']]
+        
+            date = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%MZ').strftime('%m %d')]
+            time = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%MZ').strftime('%H:%M')]
+            item['eventDate'] = date
+            item['eventTime'] = time
+            
+            items.append(item)
+   
+        return items
+        

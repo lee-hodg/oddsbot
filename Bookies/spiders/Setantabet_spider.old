@@ -1,0 +1,253 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+# from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+from scrapy.http import FormRequest
+import datetime
+import dateutil.parser  # since they use ordinal date 1st, 2nd..
+# import os
+import json
+import re
+import math
+LOG_DIR = settings['LOG_DIR']
+
+# since no bookie will list the year,we work
+# with only month and date in the 12 -31 format
+# so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now()  # datetime obj, will need str later with .strftime('%m %d')
+
+
+def getOddsRounded(odds):
+
+    '''
+    This appears to be the function used by Setantabet
+    to round the odds before doing the standard am2dec conv.
+    I found this function by examing the DOM in firebug (note
+    you can right-click func on rhs and copy and paste in a js
+    beautifier without having to dig around all the js files)
+    I ultimately grabbed it from chrome dev, as firebug was playing up
+    : enter the console and type window to get the equiv of dom then do a search
+    . Function names of interest: decimalOddsToAmerican, getOddsFromAmerican,
+    getOddsFromAmericanToEU,hongKongToDecimal, getOddsRounded...chrome say this
+    in global.js
+    '''
+    if math.fabs(odds) < 600:
+        outOdds = int(round(odds/5)) * 5
+        if outOdds == -100:
+            return 100
+        else:
+            return outOdds
+    elif (odds > -1000 and odds < 0):
+        return math.floor(odds / 5) * 5
+    else:
+        return math.floor(odds / 25) * 25
+
+
+def am2dec(odd):
+    '''
+    Convert US odds to Decimal style.
+    '''
+    if odd in ['EV', 'ev', 'even', 'evens']:
+        return odd
+
+    try:
+        odd = float(odd)
+    except ValueError:
+        return -1
+
+    # first round the odds like setantabet do
+    odd = getOddsRounded(odd)
+
+    # retrun formatted 2d
+    if odd <= -100:
+        return "%0.2f" % (1-(100/odd))
+    else:
+        return "%0.2f" % (1+(odd/100))
+
+
+# c.f. Heavenbet
+class SetantabetSpider(Spider):
+    name = "Setantabet"
+    allowed_domains = ["setantabet.com", "sbtech.com"]
+    # first grab league classes
+    url = 'https://www.setantabet.com/en-gb/Sportsbook'
+    start_urls = [url]
+
+    def parse(self, response):
+        # CurrentCultureCode cookie gets set here
+        # sel = Selector(response)
+        # Make initial ajax req
+        base_url = 'https://setantabet.sbtech.com/'
+        headers = {'Referer': 'https://www.setantabet.com/en-gb/Sportsbook'}
+
+        yield Request(url=base_url,
+                      headers=headers,
+                      callback=self.parseAJAX1)
+
+    def parseAJAX1(self, response):
+        # This will set a number of cookies
+        # ASP.NET_SessionId, firstrequest, lng, firstreferer, cTz, oSt2
+        # The response itself just consists of the sports menu on LHS and some
+        # live events.
+
+        # There are two more reqs after this hshandler and achan. Are they
+        # important? or should I just move onto the football league req?
+        # I think they are just javascripts being grabbed by other included
+        # javascripts (perhaps through jsRequire type funcs UniSlip.js),
+        # so more than likely no big deal.
+        headers = {'Host': 'setantabet.sbtech.com',
+                   'Referer': 'https://setantabet.sbtech.com/'}
+        base_url = 'https://setantabet.sbtech.com/football/'
+
+        yield Request(url=base_url,
+                      headers=headers,
+                      callback=self.preparseLeagues)
+
+    def preparseLeagues(self, response):
+        base_url = 'https://setantabet.sbtech.com/pagemethods.aspx/getBranchFilters?branchId=1'
+        headers = {'Content-Type': 'application/x-www-form-urlencoded',
+                   'Host': 'setantabet.sbtech.com',
+                   'Referer': 'https://setantabet.sbtech.com/football/',
+                   'RequestTarget': 'AJAXService'
+                   }
+
+        yield Request(url=base_url,
+                      headers=headers,
+                      callback=self.parseLeagues)
+
+    def parseLeagues(self, response):
+        # js array (see Heavenbet)
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        jsonBody = json.loads(jsonstr)
+
+        # Get LeaguesCollection Ids first, this json should now
+        # contain leagues and ids, plus the markets these leagues offer.
+        # child[5] is the markets available, if it is [] it will not be shown
+        # on setantabet.com, we should also drop it
+        leagues = []
+        for child in jsonBody:
+            # 0 is id, 1 is name
+            lid = child[0]
+            lname = child[1]
+            markets = child[5]
+            if markets:
+                leagues.append((lid, lname))
+
+        # POST req
+        base_url = 'https://setantabet.sbtech.com/pagemethods.aspx/GetLeaguesContent'
+        headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                   'Host': 'setantabet.sbtech.com',
+                   'Pragma': 'no-cache',
+                   'Referer': 'https://setantabet.sbtech.com/football/',
+                   'RequestTarget': 'AJAXService'}
+        for league in leagues:
+            data = {'BranchID': '1',
+                    'LeaguesCollection': str(league[0])
+                    }
+            yield FormRequest(url=base_url, formdata=data, headers=headers,
+                              callback=self.pre_parseData)
+
+    def pre_parseData(self, response):
+
+        # Once against resp is js array
+        # jsonstr = re.sub("[,]{2,}", ",", response.body)
+        # Use null insted of collapsing to fill ,,
+        # keeps array indices fixed independent of data being there.
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        jsonBody = json.loads(jsonstr)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" \
+              % (self.name, response.url[20:])
+
+        eventSelection = jsonBody[0][1]
+
+        mkt_ids = []  # market ids for events in league
+        metaDict = {}  # pass on eventnames, dates in meta
+        if eventSelection:
+            # Sometimes 0 if just outrights.
+            for event in eventSelection:
+                # event id (n.b. lid is event[3])
+                eid = event[0]
+
+                # eventName
+                team1 = event[1]
+                team2 = event[2]
+                eventName = [team1+' V '+team2]
+
+                # date and time
+                dateandtime = event[4]  # 2014-06-25T09:30:00.0000000
+
+                # 1x2 odds
+                # I think rest is other mkts
+                # i.e. when press +23 say.
+                # But is 1x2 always this first one?
+                # NO. This assump often but NOT ALWAYS true.
+                # I believe format like [7570568,0,,,,3] is the key
+                # i.e. second item 0 is signifying 1x2
+                mid = None
+                try:
+                    for mkt in event[5]:
+                        if mkt[1] == 0:
+                            mid = mkt[0]
+                except KeyError:
+                    continue
+                if mid:
+                    mkt_ids.append(mid)
+                    metaDict[mid] = {'eventName': eventName,
+                                     'eid': eid,
+                                     'dateandtime': dateandtime
+                                     }
+
+        # Build odds data request for league
+        base_url = 'https://setantabet.sbtech.com/pagemethods.aspx/UpdateEvents'
+        headers = {'RequestTarget': 'AJAXService',
+                   'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                   'Referer': 'https://setantabet.sbtech.com/football/'}
+        GETstr = "?requestString="
+        mkt_ids = [str(id) for id in mkt_ids]
+        GETstr += '@'.join(mkt_ids)
+        # Make request for all 1x2 odds data for league
+        # passing along eventNames and datetimes keyed by mid
+        # in the meta
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parseData, meta=metaDict)
+
+    def parseData(self, response):
+
+        # Once against resp is js array
+        # jsonstr = re.sub("[,]{2,}", ",", response.body)
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        try:
+            jsonBody = json.loads(jsonstr)
+        except ValueError as e:
+            print "[ERROR %s]: \033[7m\033[31m %s" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m jsonstr: %s" % (self.name, jsonstr)
+            return []
+
+        # get odds
+        metaDict = response.meta
+        items = []
+        for mktData in jsonBody:
+            item = EventItem()
+            mid = mktData[0]
+            # Get event data we passed in meta by mid
+            evData = metaDict[mid]
+            item['eventName'] = evData['eventName']
+            if evData['dateandtime']:
+                date_parsed = dateutil.parser.parse(evData['dateandtime'])
+            item['eventDate'] = [date_parsed.strftime('%m %d')]
+            item['eventTime'] = [date_parsed.strftime('%H:%M')]
+            # oddsData
+            # Is the assumption 1x2 is first always good?
+            oddsData = mktData[2][0][1]  # 1x2 data is first
+            if oddsData:
+                item['odd1'] = [am2dec(oddsData[1])]
+                item['odd3'] = [am2dec(oddsData[3])]
+                item['odd2'] = [am2dec(oddsData[5])]
+                items.append(item)  # validate in pipelines.py
+            else:
+                print "[ ERROR %s]: \033[7m No oddsData for:  %s \033[0m" \
+                      % (self.name, response.url)
+        return items

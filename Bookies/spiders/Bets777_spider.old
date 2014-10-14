@@ -1,0 +1,116 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import dateutil.parser #since they use ordinal date 1st, 2nd..
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class Bets777Spider(Spider):
+    name = "Bets777"
+    allowed_domains = ["777bets.co.uk"]
+
+    #utc timestamp
+    uid = datetime.datetime.utcnow().strftime("%s")
+
+    # Another Jenningsbet skin, has url with everything listed (excellent)
+
+    url = 'http://www.777bets.co.uk/777bets?CLASS_112=on&CLASS_198=on&CLASS_240=on&CLASS_130=on&CLASS_199=on&CLASS_185=on&CLASS_202=on&CLASS_126=on&CLASS_125=on&CLASS_154=on&CLASS_137=on&CLASS_132=on&CLASS_192=on&CLASS_67=on&CLASS_184=on&CLASS_191=on&CLASS_180=on&CLASS_182=on&CLASS_124=on&CLASS_127=on&CLASS_128=on&CLASS_138=on&action=showClasses&action=showClasses&'
+    url += 'uid=%s' % uid
+    start_urls=[url]
+    
+
+    def parse(self, response):
+
+        print '[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m' % (self.name,response.url[20:])
+
+        sel = Selector(response)
+        tableRows = sel.xpath('//table[@class="border"]//tr')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        blockdate = []
+        items = []
+        for row in tableRows:
+            # Main header date rows are in span, sub row header dates are not
+            rowdate_type1 = row.xpath('td[@class="boxheader"]/span[@class="ev_date_time_text"]/text()').extract()
+            rowdate_type2 = row.xpath('td[@class="boxheader"]/text()').extract()
+            # Sometimes a row is league name header
+            leagueheader = row.xpath('td[@class="mainbox_hdr"]/text()').extract()
+            if rowdate_type1:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate_type1
+                 print '[INFO %s]: \033[7m Updating blockdate,type1: %s \033[0m' % (self.name,blockdate)
+                 #wait=raw_input('ENTER TO CONT...')
+                 continue
+            elif rowdate_type2:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate_type2
+                 print '[INFO %s]: \033[7m Updating blockdate,type2: %s \033[0m' % (self.name, blockdate)
+                 #wait=raw_input('ENTER TO CONT...')
+                 continue
+            elif leagueheader:
+                 # we have a league header row, 
+                 # if ever wanted to collect these could do,
+                 # but we discard
+                 print '[INFO %s]: \033[34m League header: %s \033[0m' % (self.name, leagueheader)
+                 continue
+            else:
+                # Else test if this is an 'event' row, using time as
+                # criteria.
+                #
+               rowtime = row.xpath('td[1]/text()').extract()
+               if rowtime:
+                   # we have an event
+                       event=row
+
+                       item = EventItem()
+                       date = blockdate
+                       time = rowtime
+
+
+                       # Remember xpath returns lists, so we
+                       # must strip using code below, if non-zero
+                       time = [x.strip() for x in time]
+                       date = [x.strip() for x in date]
+
+                       # Format date and time as desired 
+                       # 777bet uses Saturday 29th of March 2014
+                       if  "Tomorrow" in date:
+                           tmoz = today + datetime.timedelta(days=1)
+                           date = [tmoz.strftime('%m %d')]
+                       elif  "Today" in date:
+                           date = [today.strftime('%m %d')]
+                       elif date != []:
+                           #remove ordinal suffix:
+                           #date=[0]=re.sub(r"(st|nd|rd|th)", "", date[0])
+                           # This still leaves problem of 1st->1 not 01
+                           # Use dateutil to parse instead.
+                           # pip install python-dateutil
+                           # see http://stackoverflow.com/questions/1258199/python-datetime-strptime-wildcard
+                           date_parsed = dateutil.parser.parse(date[0])
+                           date = [date_parsed.strftime('%m %d')]
+
+                       # Set date and time
+                       item['eventDate'] = date
+                       item['eventTime'] = time #time already 24hr for 777bet
+
+                       #eventName
+                       item['eventName'] = event.xpath('td[2]/a/text()').extract()
+
+                       # odds
+                       item['odd1'] = event.xpath('td[3][@class="odds"]/a/text()').extract()
+                       item['odd3'] = event.xpath('td[4][@class="odds"]/a/text()').extract() #draw
+                       item['odd2'] = event.xpath('td[5][@class="odds"]/a/text()').extract()
+
+                       #no exceptions raised
+                       items.append(item)  #validate in pipeline.py
+        return items
+

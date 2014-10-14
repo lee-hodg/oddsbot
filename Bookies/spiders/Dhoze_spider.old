@@ -1,0 +1,126 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#
+# Dhoze uses bpsgameserver api,like betsafe/betsson.
+#
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class DhozeSpider(Spider):
+    name = "Dhoze"
+    allowed_domains = ["dhoze.com", "bpsgameserver.com"]
+
+    #Set session cookie
+    start_urls=['https://apostas.dhoze.com/en/']
+
+    #first make the leagues request to bpsgameserver
+    def parse(self, response):
+        sel = Selector(response)
+
+        base_url = 'https://sbfacade.bpsgameserver.com/PlayableMarketService/PlayableMarketServicesV2.svc/jsonp/FetchLeftMenuJSONP?'
+        GETstr = 'unique=15_39_&segmentId=201&languageCode=en&callback=_jqjsp'
+
+        yield Request(url=base_url+GETstr, callback=self.parse_leagues)
+
+    def parse_leagues(self,response):
+
+        #extract the needed params from the JSON response
+        #json is between _jqjsp(....); so extract with regex
+        matches=re.findall(r'_jqjsp\((.+?)\);', response.body)
+        if matches:
+            jsonResp = json.loads(matches[0])
+
+        # now we have the left sidebar in JSON format,
+        # get needed football league ids
+        idList=[]
+        for country in jsonResp['FetchLeftMenuJSONPResult']['c_c'][0]['sc_r']:
+             for league in country['sc_c']:
+                 try:
+                     print league['i_c'], league['mc'], league['n'], league['rid']
+                 except UnicodeEncodeError:
+                     pass
+                 idList.append(league['i_c'])
+
+        base_url = 'https://sbfacade.bpsgameserver.com/PlayableMarketService/PlayableMarketServicesV2.svc/jsonp/FetchPrematchFullMarketsWithSortOrderJSONP?'
+
+        for id in idList:
+            # scrapy should keep track of sending session cookie (in header) after visiting home page.
+            # you check using the COOKIE DEBUG in settings.py
+            #
+            # 'unique' param looks like it is set in the jquery script (http://jsbeautifier.org/ is nice to search these scripts)
+            # It seems to increase with each req, but for now I leave fixed, seems fine. segmentid seems always fixed.
+            # I increase noOfEventsPerPageMain to 200 (as is possible on the drop down).
+            GETstr =  "unique=15_48_&subCategoryIds="+str(id)+"&segmentid=201&languageCode=en&clientTimeZone=UTC%2B02.00&"
+            GETstr +=  "noOfEventsPerPageProView=50&noOfEventsPerPageMain=200&noOfEventsPerPagePopular=50&"
+            GETstr += "noOfEventsPerPage1stHalf=50&noOfEventsPerPageHandicap=50&noOfEventsPerPageGoals=50&"
+            GETstr += "noOfEventsPerPageSpecials=50&noOfEventsPerPageOutrights=50&noOfhrsForStartingSoon=0&callback=_jqjsp"
+            # Arguably we should inc referer in the header here. Seems to work without
+            # might have to work on this in future if becomes a prob
+            yield Request(url=base_url+GETstr, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        #json is between _jqjsp(....); so extract with regex
+        matches=re.findall(r'_jqjsp\((.+?)\);', response.body)
+        if matches:
+            jsonResp = json.loads(matches[0])
+
+        try:
+            jsonData = jsonResp['FetchPrematchFullMarketsWithSortOrderJSONPResult']['mmEv']['mListEvts']
+        except KeyError as e:
+            print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Error response or 404? \033[0m" % (self.name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,jsonResp)
+            return EventItem(odd1=[],odd2=[],odd3=[],eventName=[],eventDate=[],eventTime=[])
+
+        items = []
+        # After mListEvts the events are in a list ordered by date
+        for eventBlock in jsonData:
+            for event in eventBlock['PrmEvts']:
+                item = EventItem()
+                #eventName
+                #print event['Name']
+                if event['Name']:
+                    eventName = event['Name'].replace(' - ',' V ') #spaces import or Van-da-Graff-oldboys also rep.
+                    item['eventName'] = [eventName]
+
+                #date and time
+                #print event['DeadlineUTC']
+                dateandtime = event['DeadlineUTC'] #2014-03-31T20:00:00
+                date = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S').strftime('%m %d')]
+                time = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S').strftime('%H:%M')]
+                item['eventDate'] = date
+                item['eventTime'] = time
+
+                # odds
+                for selection in event['Markets'][0]['Selections']:
+                    #print selection['Name'], selection['Odds']
+                    if selection['Name'] == '1':
+                            #home
+                            item['odd1'] = [str(selection['Odds'])]
+                    elif selection['Name'] == 'X':
+                            #draw
+                            item['odd3'] = [str(selection['Odds'])]
+                    elif selection['Name'] == '2':
+                            #away
+                            item['odd2'] = [str(selection['Odds'])]
+
+                items.append(item)
+
+        return items
+

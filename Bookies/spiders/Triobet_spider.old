@@ -1,0 +1,177 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = [
+                  'Matches',
+                  '2014',
+                  'Eurasia Cup 2014',
+                  'Playoff',
+                  u'Klassikat\xe4hed',
+                  'X-Factor',
+                  'Season Bets',
+                  'Spring Training',                    
+                  'AFC',
+                  'Outrights',
+                  'Nation Specials',
+                  'CAF Confederation Cup',
+                  'African Cup of',
+                  'FA Cup',
+                  'Progress',
+                  u'Bornholm',
+                  u'Danmarksserien',
+                  u'K\xf8benhavn (KBU)',
+                  u'Sj\xe6lland (SBU)',
+                  u'Lolland/Falster (LFBU)', 
+                  u'Women'
+                  ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link)
+            return True
+
+    return False  #don't filter rest
+
+
+
+class TriobetSpider(Spider):
+    name = "Triobet"
+    allowed_domains = ["triobet.com"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='https://www.triobet.com/eng/selection',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+
+        sel = Selector(response)
+ 
+        # Get league name (for filtering purposes) and league link (numeric category id).
+        # Only first three columns contain football.
+        # NB. Use extend not append as otherwise get sublist.
+        names = sel.xpath('//div[@id="cats-columns"]/table/tr/td[1]//tr/td[@class="category3"]/div[@class="category_name"]/a/text()').extract()
+        league_links = sel.xpath('//div[@id="cats-columns"]/table/tr/td[1]//tr/td[@class="category3"]/div[@class="category_name"]/a/@href').extract()
+        names.extend(sel.xpath('//div[@id="cats-columns"]/table/tr/td[2]//tr/td[@class="category3"]/div[@class="category_name"]/a/text()').extract())
+        league_links.extend(sel.xpath('//div[@id="cats-columns"]/table/tr/td[2]//tr/td[@class="category3"]/div[@class="category_name"]/a/@href').extract())
+        names.extend(sel.xpath('//div[@id="cats-columns"]/table/tr/td[3]//tr/td[@class="category3"]/div[@class="category_name"]/a/text()').extract())
+        league_links.extend(sel.xpath('//div[@id="cats-columns"]/table/tr/td[3]//tr/td[@class="category3"]/div[@class="category_name"]/a/@href').extract())
+        # zip
+        league_pairs = zip(names, league_links)
+       
+        #remove unwanted links; returns True to filter out link
+        league_links = [link for (league_name,link) in league_pairs if not leagueFilter(self.name, league_name)]
+
+        #with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+        #    for pair in league_pairs:
+        #        print >> lfile, pair
+
+        for link in league_links:
+            base_url='http://www.triobet.com'
+            yield Request(url=base_url+link, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # Triobet does not list (date, time) if it is same as the events directly above,
+        # thus, need to keep list, and if (date,time) empty use last non-empty value of prev event.
+        seen_datetimes=[]
+      
+        # don't include header
+        eventSelection = sel.xpath('//div[@class="tabcontentcontainer"]/div[2]/table[@class="selectionstbl"]//tr[@class != "first dark"]')
+
+        items = []
+        
+        for event in eventSelection:
+   
+               item = EventItem()
+
+               # Get eventName.              
+               item['eventName'] = event.xpath('td[@class="item-label"]/text()').extract()
+               if item['eventName']:
+                    #replace ' - ' with 'V' for vs
+                    item['eventName'][0] = item['eventName'][0].replace(' - ',' V ') #space around - imp
+
+               # [u'24.03', u'23:00'] because of the <br/> 
+               dateandtime = event.xpath('td[@class="endingtime"]/text()').extract()
+               dateandtime = [x.strip() for x in dateandtime]
+
+               if len(dateandtime) == 2:
+                   #unpack list 
+                   date, time = dateandtime
+               elif len(dateandtime) ==1 and 'Live' in dateandtime[0]:
+                   date = today.strftime('%d.%m') #so it matches for later.
+                   time = today.strftime('%H:%M') #unimportant
+               else: 
+                   #No date and time, use last seen later.
+                   date=time=''
+ 
+               if date and time:
+                    # Standarise formatting  to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = datetime.datetime.strptime(date, '%d.%m').strftime('%m %d')
+                        seen_datetimes.append((date,time))
+                    except ValueError as e:
+                            try:
+                                date = datetime.datetime.strptime(date, '%d.%m.%y').strftime('%m %d')
+                            except ValueError as e:
+                                print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                                print '[ERROR %s]: \033[7m\033[31m Tried d.m and d.m.y, no luck.' % self.name
+                                print "[ERROR %s]: \033[7m\033[31m Date dump: %s. SKIP." % (self.name, date)
+                                continue
+               else:
+                   #use last seen non-empty date, time
+                   try:
+                       date=seen_datetimes[-1][0]
+                       time=seen_datetimes[-1][1]
+                       print "[INFO %s]: \033[7m  Using last seen date, time: %s, %s \033[0m " % (self.name, date,time)
+                   except IndexError as e:
+                        print "[ERROR %s]: \033[7m\033[31m IndexError: %s for URL: %s \033[0m" % (self.name, e, response.url)
+                        print '[ERROR %s]: \033[31m\033[7m Using last seen date IndexError: %s raised for site: %s \033[0m' % (self.name, e,  response.url)
+                        print '[ERROR %s]: \033[31m\033[7m Last seen date length \033[34m %s \033[0m' % (self.name,len(seen_datetimes))
+                        continue
+                       
+               item['eventDate'] = [date]
+               item['eventTime'] = [time]
+
+               # Get prices.
+               #odd3 is draw
+               item['odd1'] = event.xpath('td[4][@class="bet"]/a/span[@class="odds display_block"]/text()').extract()
+               item['odd3'] = event.xpath('td[5][@class="bet"]/a/span[@class="odds display_block"]/text()').extract()
+               item['odd2'] = event.xpath('td[6][@class="bet"]/a/span[@class="odds display_block"]/text()').extract()
+
+               items.append(item)  #only append if at least one odd found   
+
+        return items
+

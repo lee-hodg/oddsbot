@@ -1,0 +1,58 @@
+Working ff:
+
+
+POST http://www.betvictor.com/sports/en/football HTTP/1.1
+Host: www.betvictor.com
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:28.0) Gecko/20100101 Firefox/28.0 Paros/3.2.13
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-gb
+DNT: 1
+Referer: http://www.betvictor.com/sports/en/football
+Connection: keep-alive
+Pragma: no-cache
+Cache-Control: no-cache
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 145
+
+
+TS644333_id=3&TS644333_75=7a8b924dcf5f791d1dae6e246b5433bd%3Akijj%3A6K812H5v%3A1137271628&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0
+
+and if copy into request works:
+
+just copying the param string into request works in fact
+
+Still does not work until you fix order....
+
+
+
+POST http://www.betvictor.com/sports/en/football HTTP/1.1
+Content-Length: 146
+Accept: */*
+User-Agent: python-requests/1.2.3 CPython/2.7.5+ Linux/3.11.0-18-generic Paros/3.2.13
+Host: www.betvictor.com
+Content-Type: application/x-www-form-urlencoded
+
+
+
+
+Content-Type: application/x-www-form-urlencoded is essential
+
+Now it works from requests using the POSTstr
+
+TS644333_id=3&TS644333_75=7a8b924dcf5f791d1dae6e246b5433bd%3Akijj%3A6K812H5v%3A1137271628&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0
+
+id, 75,md,rf,ct,pd
+
+
+Experiment:
+
+take the scrapy param value string from wireshark packet:
+TS644333_rf=0&TS644333_id=3&TS644333_75=e51e0867174a5c8705d7ae13ad5b5db0%3Akhkl%3A7WecP1Lm%3A1581034604&TS644333_pd=0&TS644333_ct=0&TS644333_md=1
+
+
+Using paros inject it into a working cURL, it wont work.
+
+However reorder it to id, 75,md,rf,ct,pd
+and voila, all good!
+
+So it simply seems to be a case of param order matters!

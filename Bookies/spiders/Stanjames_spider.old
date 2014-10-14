@@ -1,0 +1,141 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+#Need UK VPN
+class StanjamesSpider(Spider):
+    name = "Stanjames"
+    allowed_domains = ["stanjames.com"]
+
+    # Visit the football homepage first 
+    # set session cookies
+    def start_requests(self):
+        yield Request(
+        url='http://www.stanjames.com/UK/541/betting#bo-navigation=58974.2,153744.2&action=market-group-list',
+        callback=self.pre_parse_countries
+        )
+
+    def pre_parse_countries(self, response):
+        # make request to GET XML with all country market ids
+        base_url = 'http://www.stanjames.com/cache/boNavigationList/541/UK/58974.2.xml'
+        headers = {'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                   'Referer': 'http://www.stanjames.com/UK/541/betting'}
+        yield Request(url=base_url, headers=headers, callback=self.parse_countries)
+
+    def parse_countries(self, response):  
+
+        # build ajax request that we'll use to request the country market group
+        # ids (u'Bulgarian Football', u'58996.2') in XML format 
+
+        sel = Selector(response)
+        countryNames = sel.xpath('//bonavigationnodes/bonavigationnode/name/text()').extract()
+        mGroupIds = sel.xpath('//bonavigationnodes/bonavigationnode/idfwbonavigation/text()').extract()
+        #keep only English Football, etc..
+        country_pairs=[(country,id) for (country,id) in zip(countryNames,mGroupIds) if country.endswith('Football')]
+
+        #zip is nice to match these to names
+        #with open('Stanjames_countries.log','w') as linksf:
+        #    for pair in country_pairs:
+        #        print pair
+        #        print >> linksf, pair
+
+        headers={ 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Referer': 'http://www.stanjames.com/UK/541/betting'}
+
+        
+        for pair in country_pairs:
+            # for each marketId (i.e. each country) built ajax GET request, to
+            # receive back leagues for that country in XML format.
+            base_url = 'http://www.stanjames.com/cache/boNavigationList/541/UK/'+str(pair[1])+'.xml'
+            yield Request(url=base_url, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self, response):  
+
+        # build ajax request that we'll use to request the league market group
+        # ids (u'Bulgarian Football', u'58996.2') in XML format 
+
+        sel = Selector(response)
+        leagueNames = sel.xpath('//marketgroups//marketgroup/name/text()').extract()
+        leagueIds = sel.xpath('//marketgroups//marketgroup/idfwmarketgroup/text()').extract()
+        #zip is nice to match these to names
+        #with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+        #    for pair in zip(leagueNames,leagueIds):
+        #        print pair
+        #        print >> lfile, pair
+
+        headers={ 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Referer': 'http://www.stanjames.com/UK/541/betting'}
+        for id in leagueIds:
+            # for each marketId (i.e. each league) built ajax GET request, to
+            # receive back event data for that league in XML format. (lightMarketGroup
+            # has no price data)
+            base_url = 'http://www.stanjames.com/cache/MarketGroup/UK/'+str(id)+'.xml'
+            yield Request(url=base_url, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        eventSelection = sel.xpath('//markets//market')
+
+        print "[INFO %s]: \033[7m Number of events in Selection: \033[34m %s \033[0m " % (self.name,len(eventSelection))
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+
+               # Get eventName.              
+               item['eventName'] = event.xpath('eventname/text()').extract()
+ 
+               #'2014-03-24T18:00:00'
+               dateandtime = event.xpath('tsstart/text()').extract()
+ 
+               if dateandtime:
+                    # Standarise formatting  to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.strptime(dateandtime[0], '%Y-%m-%dT%H:%M:%S').strftime('%m %d')]
+                        time = [datetime.datetime.strptime(dateandtime[0], '%Y-%m-%dT%H:%M:%S').strftime('%H:%M')]
+                    except ValueError as e:                    
+                        print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                        print "[ERROR %s]: \033[7m\033[31m dateandtime dump: %s" % (self.name, dateandtime)
+                        continue
+               else:
+                  date = []
+                  time = []
+
+               item['eventDate'] = date
+               item['eventTime'] = time
+
+               item['odd1']=item['odd3']=item['odd2']=[]
+               oddsSelection = event.xpath('selections//selection')
+
+               for selection in oddsSelection:
+                   selType = selection.xpath('hadvalue/text()').extract()
+                   odd_up = selection.xpath('currentpriceup/text()').extract()
+                   odd_down= selection.xpath('currentpricedown/text()').extract()
+                   #print selType, odd_up[0]+'/' + odd_down[0]
+                   if odd_up and odd_down:
+                       if selType == [u'H']:
+                           item['odd1'] = [odd_up[0]+'/'+odd_down[0]]
+                       elif selType == [u'D']:
+                           item['odd3'] = [odd_up[0]+'/'+odd_down[0]]
+                       elif selType == [u'A']:
+                           item['odd2'] = [odd_up[0]+'/'+odd_down[0]]
+
+               items.append(item)  #only append if at least one odd found   
+
+        return items
+

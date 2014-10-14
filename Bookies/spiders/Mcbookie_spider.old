@@ -1,0 +1,90 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class McbookieSpider(Spider):
+    name = "Mcbookie"
+    allowed_domains = ["mcbookie.com"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='http://www.mcbookie.com/sports/en/football',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+
+        sel = Selector(response)
+
+        # 35838 seem to be match odds
+        #en/football/oma-oman-preemier-league/coupons/100/40141010/0/35838/0/PE/0/0/0/35/1
+        sx = SgmlLinkExtractor(allow=[r'http://www.mcbookie.com/sports/en/football/[A-Za-z0-9-]+/coupons/100/[0-9]+/0/35838/0/PE/0/0/0/35/1'
+                                     ])
+        league_links = sx.extract_links(response)
+
+        for link in league_links:
+            #print link.url
+            yield Request(link.url, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])        
+
+        eventSelection = sel.xpath('//table/tbody//tr')
+
+        items = []
+
+        for event in eventSelection:
+               item = EventItem()
+
+               # Remember xpath puts everything into list, even if single item.
+               # need to lob off three zeros to make valid date
+               dateandtime = [x.strip()[:-3] for x in event.xpath('td[@class="date"]/span/@data-time').extract()]
+ 
+               if dateandtime:
+                    # Standarise formatting frp, unix stamp to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%m %d')]
+                        time = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%H:%M')]
+                    except ValueError as e:
+                        print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                        print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+                        continue 
+               else:
+                   # Without date, useless (and pipeline will drop anyway), 
+                   # skip to next event.
+                   continue
+
+               item['eventDate'] = date
+               item['eventTime'] = time
+
+               # Get eventName.              
+               item['eventName'] = event.xpath('td[@class="event_description"]/a/text()').extract()
+
+               # Get prices.
+               #item['odd1'] = event.xpath('td[3][@class="outcome_td"]/@data-sort').extract()
+               #item['odd3'] = event.xpath('td[4][@class="outcome_td"]/@data-sort').extract() #our conv is odd3 is draw
+               #item['odd2'] = event.xpath('td[5][@class="outcome_td"]/@data-sort').extract()
+               item['odd1'] = event.xpath('td[3][@class="outcome_td"]/span/a/span/text()').extract()
+               item['odd3'] = event.xpath('td[4][@class="outcome_td"]/span/a/span/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[5][@class="outcome_td"]/span/a/span/text()').extract()
+   
+               items.append(item)  #validate in pipelines.py
+   
+        return items
+
+

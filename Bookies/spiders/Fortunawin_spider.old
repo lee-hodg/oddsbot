@@ -1,0 +1,144 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class FortunawinSpider(Spider):
+    name = "Fortunawin"
+    allowed_domains = ["fortunawin.com"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='http://www.fortunawin.com/hu/sportfogadas',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+        sel = Selector(response)
+
+        # deny world cup groups a-i, and some other outright type markets
+        # I think a better approach on other would be to deny with regex on bajnokok: final result
+        # vegeredmeny: champions,golkiraly:top goalscorer, gyoztes:winners, kieso: relegated, ben-vegez
+        sx = SgmlLinkExtractor(allow=[r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/[A-Za-z-]+'],
+                               deny=[r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/eb-selejtezo-[a-z]-csoport',
+                                     r'http://www\.fortunawin\.com/hu/sportfogadas/labdarugas/[a-z0-9A-z-]*(ben-vegez|gyoztes|kieso|bajnok|vegeredmeny|golkiraly)[a-z0-9A-z-]*',
+                                    ])
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/anglia-1-elso-10-ben-vegez',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/anglia-1-elso-4-ben-vegez',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/bajnokok-ligaja-gyoztes',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/svajc-1-liga-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/spanyolorszag-1-golkiraly',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/spanyolorszag-1-liga-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/bajnokok-ligaja-vegeredmeny',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/europa-liga-vegeredmeny',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/portugalia-1-liga-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/oroszorszag-1-liga-vegeredmeny',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/spanyolorszag-1-liga-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/bajnokok-ligaja-golkiraly',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/oroszorszag-1-liga-bajnok',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/cseh-kupa-gyoztes',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/anglia-premier-league-kieso',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/anglia-premier-league-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/anglia-premier-league-vegeredmeny-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/belgium-jupiter-pro-league-bajnok-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/belgium-jupiter-pro-league-vegeredmeny-11-12',
+                                     #r'http://www.fortunawin.com/hu/sportfogadas/labdarugas/olaszorszag-1-liga-bajnok-11-12',
+                            
+        league_links = sx.extract_links(response)
+
+        for link in league_links:
+            #print link.url
+            yield Request(link.url, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # table id are in form like betTable-17-1, so need each with starts-with
+        # and remove the first row, as it the table header
+        eventSelection = sel.xpath('//table[starts-with(@id, "betTable-")]//tr')[1:]
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+            
+
+               # Get eventName.              
+               item['eventName'] = event.xpath('td[@class="col_title"]/div[@class="bet_item_content_text"]/span/a/text()').extract()
+               if item['eventName']:
+                    #replace '-' with ' V ' for vs
+                    item['eventName'][0] = item['eventName'][0].replace('-',' V ') #For fortunawin no space around -, hopefully they won't use it in team names.
+                    #test = item['eventName'][0].split(' V ')
+                    #if len(test) !=2: 
+                    #    print response.url
+                    #    wait = raw_input('dodgy league? ENTER TO CONT...')               
+
+               # [u'24.03', u'23:00'] because of the <br/> 
+               dateandtime = event.xpath('td[@class="col_date sorted_column"]/span/text()').extract()
+               dateandtime = [x.strip() for x in dateandtime]
+
+               if len(dateandtime) == 2:
+                   #unpack list 
+                   date, time = dateandtime
+                   #print "\033[7m Stripped dateandtime: date,time: %s, %s \033[0m " % (date,time)
+               elif len(dateandtime) ==1 and 'Live' in dateandtime[0]:
+                   date = today.strftime('%m %d')
+                   time = today.strftime('%H:%M')
+               else:
+                   #No date and time, view problem
+                   print "[ERROR %s]: \033[31m\033[7m dateandtime length not 2: %s \033[0m " % (self.name,dateandtime)
+                   return EventItem() #no point continuing without date.
+
+               if date and time:
+                    # Standarise formatting  to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = datetime.datetime.strptime(date, '%d.%m.').strftime('%m %d')
+                    except ValueError as e:
+                        if "unconverted" in str(e):
+                            # sometimes date is of format %d.%m.%y so deal with that
+                            try:
+                                date = datetime.datetime.strptime(date, '%d.%m.%y').strftime('%m %d')
+                                print '[INFO %s]: \033[7m Fixed the date in d.m.y to: %s \033[0m' % (self.name,date)
+                            except ValueError as e:
+                                print '[ERROR %s]:\033[7m\033[31m ValueError %s raised again for site: %s. Even aft try other format date. \033[0m' % (self.name, e, response.url)
+                                print '[ERROR %s]: Date and/or time badly formated?:', date, time
+                                return EventItem()
+                    except TypeError as e:
+                        print '[ERROR %s]:\033[7m\033[31 TypeError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+                        print '[ERROR %s]: Date and/or time badly formated?:', date, time
+                        return EventItem()
+
+               item['eventDate'] = [date]
+               item['eventTime'] = [time]
+
+               # Get prices.
+               #text contents of tag is \n\t\t\t\t\t\t<div class="border_like"></div>\n1.3 for e.g.
+               #this returns two values in list for each odd.
+               item['odd1'] = []
+               item['odd3'] = []
+               item['odd2'] = []
+               item['odd1'] = event.xpath('td[2]/a/text()').extract()
+               item['odd3'] = event.xpath('td[3]/a/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[4]/a/text()').extract()
+               empty = ['',u'',' ',u' ']
+               if item['odd1']: item['odd1'] = [x.strip() for x in item['odd1'] if x.strip() not in empty]
+               if item['odd3']: item['odd3'] = [x.strip() for x in item['odd3'] if x.strip() not in empty]
+               if item['odd2']: item['odd2'] = [x.strip() for x in item['odd2'] if x.strip() not in empty]
+
+               items.append(item)  #only append if at least one odd found   
+        return items
+
+

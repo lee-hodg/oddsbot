@@ -1,0 +1,211 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime, re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#%m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+def leagueFilter(spider_name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    # These are links to rugby, horse racing, darts,...
+    junkPhrases = [
+		 u'/mainbook/130021',
+		 u'/mainbook/247232',
+		 u'/mainbook/76424',
+		 u'/mainbook/76911',
+		 u'/mainbook/246830',
+		 u'/mainbook/264971',
+		 u'/mainbook/248453',
+		 u'/mainbook/24514',
+		 u'/mainbook/762927',
+		 u'/mainbook/790439',
+		 u'/mainbook/745993',
+		 u'/mainbook/790404',
+		 u'/mainbook/894043',
+		 u'/mainbook/893908',
+		 u'/mainbook/693326',
+		 u'/mainbook/200454',
+		 u'/mainbook/44095',
+		 u'/mainbook/46080',
+		 u'/mainbook/23571',
+		 u'/mainbook/47637',
+		 u'/mainbook/23205',
+		 u'/mainbook/46957',
+		 u'/mainbook/25157',
+		 u'/mainbook/81335',
+		 u'/mainbook/39036',
+		 u'/mainbook/44036',
+		 u'/mainbook/81108',
+		 u'/mainbook/23584',
+		 u'/mainbook/24064',
+		 u'/mainbook/23244',
+		 u'/mainbook/46489',
+		 u'/mainbook/27541',
+		 u'/mainbook/43293',
+		 u'/mainbook/246408',
+		 u'/mainbook/200727',
+		 u'/mainbook/441529',
+		 u'/mainbook/81037',
+		 u'/mainbook/41466',
+                 u'/mainbook/256536',
+                 u'/mainbook/200932',
+                 u'/mainbook/1384293',
+                 u'/mainbook/792916',
+                 u'/mainbook/1477447',
+                 u'/mainbook/45939',
+                 u'/mainbook/81305',
+                 u'/mainbook/81305',
+                 u'/mainbook/22955',
+                 u'/mainbook/105462',
+                 u'/mainbook/46709',
+                 u'/mainbook/23317',
+                 u'/mainbook/46767',
+                 u'/mainbook/23287',
+                 u'/mainbook/46846',
+                 u'/mainbook/47556',
+                 u'/mainbook/448281',
+                 u'/mainbook/1451463',
+                 u'/mainbook/1426100',
+                 u'/mainbook/1479278',
+                 u'/mainbook/1433253',
+                 u'/mainbook/1451334',
+                 u'/mainbook/1433796',
+                 u'/mainbook/1455133',
+                 u'/mainbook/1425568',
+                 u'/mainbook/1455133',
+                 u'/mainbook/23189',
+                 u'/mainbook/202222',
+                 u'/mainbook/23173',
+                 u'/mainbook/1554998',
+                 u'/mainbook/244969',
+                 u'/mainbook/245537',
+                 u'/mainbook/244916',
+                 u'/mainbook/201755',
+                 u'/mainbook/200984',
+                 u'/mainbook/249260',
+                 ]
+                 
+
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (spider_name,link)
+            return True
+    return False  #don't filter rest
+
+
+class BetbutlerSpider(Spider):
+    name = "Betbutler"
+
+    #URL with soccer comp click req
+    start_urls = ['http://www.betbutler.co.uk/mainbook/sports/Football/ep-England']
+
+    #you must retain the name 'parse' with basic spider!   
+    def parse(self, response):  
+        #parse league links
+
+        sel = Selector(response)
+
+        # Get link tails	
+	league_links = sel.xpath('//ul/li[1]/div[@class="subitems"]/ul//li/div[@class="subitems"]/ul//li/h4/a/@href').extract()
+        #remove unwanted links, returns True to filter out link
+        league_links = [link for link in league_links if not leagueFilter(self.name,link)]
+        #print 'links left:', len(league_links)
+        # for each league build the ajax request
+        # cookie will be set when visted sports betting page, as you can see with COOKIE DEBUG True
+        base_url = 'http://www.betbutler.co.uk'
+        headers = { 'Referer' : 'http://www.betbutler.co.uk/mainbook/sports/Football/ep-England/ep-Premier-League'}
+
+        #link = league_links[0]
+        #link=base_url+link
+        #yield Request(url=link, headers=headers, callback=self.parse_Data)
+        for link in league_links:
+            link=base_url+link
+            # pass original link along for aid building filtering patterns
+            # the link req not same as response.url (redirected)
+            req = Request(url=link, headers=headers, callback=self.parse_Data)
+            req.meta['orig'] = link
+            yield req
+
+    def parse_Data(self, response, orig=None):
+
+        sel = Selector(response)
+        print '[INFO %s]: \033[7m Original link was %s \033[0m' % (self.name,response.meta['orig'])
+        print '[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m' % (self.name,response.url[20:])
+    
+        # Betbutler has very annoying display for each league (c.f. Interwetten), 
+        # with all events of certain date under that date block head.
+        tableRows = sel.xpath('//table[@class="events"]')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        blockdate = []
+        items = []
+        for row in tableRows:
+            rowdate = row.xpath('tr[@class="event_date"]/td[1]/span/text()').extract()
+            if rowdate !=[]:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate
+                 #print 'DEBUG: UPDATING BLOCKDATE:', blockdate
+            else:
+                # Else test if this is an 'event' row, using time as
+                # criteria.
+                rowtime = row.xpath('tr/td[@class="event_desc"]/span/span/text()').extract()
+                if rowtime !=[]:
+                        event=row
+
+                        item = EventItem()
+
+                        #set eventName
+                        item['eventName'] = event.xpath('tr/td[@class="event_desc"]/span/a/text()').extract()
+
+                        date = blockdate
+                        time = rowtime
+
+                        # Remember xpath returns lists, so we
+                        # must strip using code below, if non-zero
+                        date = [x.strip() for x in date]
+                        time = [x.strip() for x in time]
+
+                        # Format date as desired 
+                        if  "Tomorrow" in date:
+                            tmoz = today + datetime.timedelta(days=1)
+                            date = [tmoz.strftime('%m %d')]
+                        elif  "Today" in date:
+                            date = [today.strftime('%m %d')]
+                        elif date:
+                            try:
+                                # Betbutler uses 'Tuesday, 25 March 2014' and '23:30'
+                                date = [datetime.datetime.strptime(date[0], '%A, %d %B %Y').strftime('%m %d')]
+                            except IndexError as e:
+                                print '\033[31m\033[7m [%s ERROR:] %s \033[0m' % (self.name,e)
+                                continue #skip to next row (date is essential)
+                            except ValueError as e:
+                                 print '\033[31m\033[7m [%s ERROR:] %s \033[0m' % (self.name,e)
+                                 if date: print '\033[31m\033[7m [%s ERROR:] date: %s \033[0m' % (self.name,date)
+                                 print '\033[31m [%s ERROR:] Locale check: %s \033[0m' % (self.name, [datetime.datetime.strptime('2014-11-05', '%Y-%m-%d').strftime('%A, %d %B %Y')])
+                                 continue #skip to next row (date is essential)
+                        # Set date and time
+                        item['eventDate'] = date
+                        item['eventTime'] = time #time already 24hr for Betbutler
+
+                        # set odds
+                        item['odd1'] = event.xpath('tr/td[2]/div[1]/span/span[@class="formatted_price"]/text()').extract()
+                        item['odd3'] = event.xpath('tr/td[3]/div[@title="Draw"]/span/span[@class="formatted_price"]/text()').extract() #draw
+                        item['odd2'] = event.xpath('tr/td[4]/div[1]/span/span[@class="formatted_price"]/text()').extract()
+ 
+                        items.append(item)  # Validation in pipeline.py   
+        return items

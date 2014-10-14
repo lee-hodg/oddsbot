@@ -1,0 +1,205 @@
+Betvictor works as follows: you make an initial GET
+request to http://www.betvictor.com/sports/en/football 
+(or the homepage or infact the premier league page),
+and you are sent an initial page with some javascript 
+and a hidden form. If javascript is enabled, it performs
+some computations, fills the form and submits as POST.
+When the server receives this it serves up the desired content
+and sets a cookie, which should avoid need for js challenge again.
+
+There are three options:
+
+1) You could use selenium with a headless client like phantomJS (cf
+the preloved script). Could be slow and messy however.
+
+2) As it happens, there seems to be a loophole, if you append a trailing
+'/' to the URL requested, it seems to forgo the need to pass the test/set cookie,
+and serves up desired content regardless.
+
+3) Scrape the initial response body script to get parameters (c,slt,s1..), simulate
+the javascript computation in python, make a POST request back to server.
+
+========================================================================
+
+1) and 2) are obvious so here I discuss 3).
+
+
+Firstly it's useful to have a means to check your python simulation against the
+javascript, so download the initial response body (in scrapy response.body or elsewhere)
+, then you can either change inputs from hidden to something like
+
+
+a) <input style="width:800px;" type="text" name="TS644333_75" value="cr"/>
+b) remove form alltogether and just have a 
+document.write("value=8814bc074765762ef687b280d328f3e8:" + chlg + ":" + slt + ":" + crc);
+
+*make sure you retain <body onload="test()"> to invoke the func, and remove
+document.forms[0].submit(); so form is not attempted to be submitted.
+
+-----------------------------------------------------------------------------
+
+Using wireshark to help diagnose:
+
+Use filter ip.addr==212.22.225.203 && http, now when running scrapy/requests/curl/firefox
+you should see the GET and POST packets.
+
+You want to look at the Hypertext Transfer Protocal section as this is the application layer,
+expand POST, and expand the Line-based text data. Then you can save packet with file>print>print 
+to file. Select just the packet selected, and packet details 'as displayed' (make sure you've expanded 
+bits you want to see).
+--------------------------------------------------------------------------------
+
+Using cURL to help diagnose:
+
+In firebug go to Net > HTML (select persist if needed) then right click the POST req
+and select 'copy as cURL', paste into terminal (you possibly may need to append a '--compressed'
+to decompress response). You can rip some of the headers and see what is the minimum that works,
+you can also directly copy the TS644333_75 you computed in python to here to double check this value is
+correct.
+
+Scrapy uses http 1.0 by default, so to eliminate that being a problem, in cURL add
+--http1.0.
+
+----------------------------------------------------------------------------------
+
+A note on urlencoding. Things like ':' get urlencoded to '%3A'. Scrapy FormRequest does
+this automatically if dictionary is passed, so don't put it in again otherwise it will attempt
+to double encode; the same is true for python requests lib with data={ 'some_param':'value_1', ...}
+(don't urlencode!). However, if you pass python requests a POSTstr instead, you want to urlencode then
+. You do this with import urllib, then urllib.quote_plus(value) to finish with something like
+7a8b924dcf5f791d1dae6e246b5433bd:kijj:A6K812H5v:1137271628  -->
+7a8b924dcf5f791d1dae6e246b5433bd%3Akijj%3A6K812H5v%3A1137271628
+
+cURL also needs urlencoded string (I think)
+
+-----------------------------------------------------------------------------------
+
+A note on cookies. These are just local files with same values stored:
+cookie1.txt :ID=7613dca643e92b31:TM=1395392504:LM=1395392504:S=6Akzgl2t0cicE1oG
+These get added to header on requests, so can easily be simulated that way, and are visible in
+wireshark packets. Scrapy automatically manages session cookies. In python requests
+you manage cookies with from requests import Session,session = Session(),
+session.head('http://www.betvictor.com/sports/en/football') (only head need to set cookies).
+However cookies are unimportant for initial POST, only after the POST we get a cookie set once
+verified.
+
+Using COOKIES_DEBUG=True in Bookies/settings.py allows you to see all cookies scrapy is setting.
+
+---------------------------------------------------------------------------------------------
+
+A final tool to aid diagnosis: paros.
+
+Wireshark is good, but it doesn't allow me to fiddle with the packet then resend, which would be
+quick and effective way of working out what is the problem.
+
+The cURL, firefox, requests and scrapy packets headers look identical, the only difference seemed
+to be the order to the params in the POSTstr. Scrapy and requests were messing with the id, 75,md,rf,ct,pd
+order. 
+
+How to install paros: download, unzip, then cd into the build dir. 
+First apt-get install ant which is required, then simply type 'ant' in the build dir.
+You'll see a couple of errors because the logfiles contain some stupid non ascii chars or
+some such at the very top...simply locate them(HistoryFilterDialog.java,...) and delete these lines of text. Try ant again in
+build dir. SUCCESS.
+
+Now cd into paros dir, and run the paros.jar
+
+/usr/lib/jvm/java-7-oracle/jre/bin/java -jar paros.jar
+
+(don't use gnu java. See file /etc/alternatives/java /etc/alternatives/javac for locations)
+
+In tools>options change proxy to something different (so doesnt clash with dansguardian on 8080)
+maybe 9999. Then point firefox to 127.0.0.1:9999 so paros can capture the reqs.It's a little slow
+but does the job. 
+
+To point cURL to it: --proxy http://127.0.0.1:9999
+
+to point python requests to it:
+
+http_proxy  = "127.0.0.1:9999"
+https_proxy  = "127.0.0.1:9999"
+ftp_proxy  = "127.0.0.1:9999"
+
+proxyDict = {
+              "http"  : http_proxy,
+              "https" : https_proxy,
+              "ftp"   : ftp_proxy
+            }
+
+response = session.post(
+    url='http://www.betvictor.com/sports/en/football',
+    data=POSTstr,
+    headers={'Content-Type': 'application/x-www-form-urlencoded'},
+    proxies=proxyDict
+)
+
+Now you can capture, fiddle and resend packets. The result I found was that
+so long as headers={'Content-Type': 'application/x-www-form-urlencoded'}, was present
+you just needed to make sure the POST params were in the id, 75,md,rf,ct,pd order
+and it would be sufficient for successful response from server rather than another challenge.
+Even taking a firefox captured POST packet and messing with order of params meant a bad response
+would be received.
+
+-------------------------------------------------------------------------------------------------
+
+
+So how to make sure scrapy doesn't mess with the order:
+
+Use a tuple instead of dict:
+
+ot=     ( ('TS644333_id', '3'),
+                  ('TS644333_75', str(value.strip())),
+                  ('TS644333_md', '1'),
+                  ('TS644333_rf', '0'),
+                  ('TS644333_ct', '0'),
+                  ('TS644333_pd', '0')
+                 )
+        yield FormRequest(
+        url='http://www.betvictor.com/sports/en/football',
+        formdata=ot,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        callback=self.parse_leagues
+        )
+
+-----------------------------------------------------------------------------------------------------
+
+
+
+The actual javascript emulation script itself
+Bookies/spiders/Betvictor_script.py
+
+This is a module you can import in your Betvictor spider
+as
+from Betvictor_script import process_script, then simply feed
+it the challenge response: value = process_script(response) to get out the _75
+value needed.
+
+It should be mostly self explanatory. Just be careful with range() when counting downward!
+and remember that js has 32bit precision ints, whereas python has arbitrary precision, hence
+when doing bitwise ops, to get the same result, we need to emulate 32bit ints
+
+
+# see http://stackoverflow.com/questions/22518641/
+               # why-does-this-bitwise-operation-not-give-same-result-
+               # in-python-and-js?noredirect=1#comment34265098_22518641
+
+x = x & 0xFFFFFFFF   # Keep only 32 bits
+               if x >= 0x80000000:
+                   # Consider it a signed value (0x80000000 is 2147483648 2^32 over 2)
+                   x = -(0x100000000 - x)    # (0x100000000 is 2^32)
+
+
+The 0xFFFFFFFF is a mask 1111 1111 1111 1111 in binary and doing the & means only if both
+operands have 1 will the result be kept with 1, hence you basically filter out anything beyond
+32 bits with this mask. 
+
+
+---------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+

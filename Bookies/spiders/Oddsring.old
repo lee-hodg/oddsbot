@@ -1,0 +1,182 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import pytz
+import urllib  # for encode with .quote
+import re
+# from time import time
+LOG_DIR = settings['LOG_DIR']
+
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+
+# Oddsring now sets a cookie via js (not headers) on init page
+# necessary to scrape the value, and use in this func
+# IP can only be obtained by external query, set static for now
+def setCookie(cname, value='80.243.189.3', expire_days=10):
+    # Set aware tz.
+    dt = datetime.datetime.now(pytz.utc) + datetime.timedelta(days=expire_days)
+    # stamp = int(newday.strftime("%s"))*1000  #ms
+    # infact ultimately want date formatted like Wed, 28 Jul 1993 09:09:07 UTC
+    expire_date = dt.strftime("%a, %d %b %Y %H:%M:%S %Z")
+    cookie = cname + "=" + urllib.quote(value) + ";expires=" + expire_date + ";path=/"
+    return cookie
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['Winner',
+                   'Top',
+                   ]
+
+    exceptionPhrases = ['']
+
+    for phrase in exceptionPhrases:
+        # don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name, link)
+            return True
+
+    return False  # don't filter rest
+
+
+class OddsringSpider(Spider):
+
+    name = "Oddsring"
+
+    # ovveride usual delay with spider-specific attr
+    # without some delay this server gets overwhelmed and starts giving 503
+    # service unavail. This will also help not getting blocked.
+    # see also max_concurrent_requests, which is a spider attr overriding
+    # CONCURRENT_REQUESTS_PER_SPIDER(8 by default)
+    download_delay = 1
+
+    # Visit the homepage first
+    def start_requests(self):
+        yield Request(url='http://www.oddsring.com/',
+                      callback=self.setupJScookie, dont_filter=True)
+
+    def setupJScookie(self, response):
+        sel = Selector(response)
+        wanted_script = sel.xpath('//script').extract()[0]
+        wanted_line = wanted_script.splitlines()[-11]
+        p = re.compile(r"setCookie\(\'(?P<cname>.+)\'\, \'(?P<value>.+)\'\, (?P<expire_days>\d+)\);")
+        m = p.match(wanted_line)
+        dico = m.groupdict()
+        cname = None
+        value = None
+        # expire_days = 10
+        if 'cname' in dico:
+            cname = dico['cname']
+        if 'value' in dico:
+            value = dico['value']
+        # if 'expire_days' in dico:
+        #    expire_days = dico['expire_days']
+
+        if cname and value:
+            # cookie = {cname: setCookie(cname, value=value, expire_days=int(expire_days))}
+            # Doesn't look like I can set a sticky cookie anyway, so no point in
+            # expiry date, will need to resend each time with request manually
+            cookie = {cname: value}
+        else:
+            cookie = None
+            print 'Could not get either cname of value from init js cookie setter.'
+            exit()
+
+        # add cookie and reload
+        yield Request(url='http://www.oddsring.com/', cookies=cookie,
+                      callback=self.parseLeague, dont_filter=True)
+
+    def parseLeague(self, response):
+        # If need to can access the last cookie you set with
+        # request.headers.getlist('Cookie')
+
+        sel = Selector(response)
+
+        lnames = sel.xpath('//ul[@id="sb-sportlist"]/li[1]/ul[@id="lg1"]/li/'
+                           'div[@class="line"]/a/text()').extract()
+        links = sel.xpath('//ul[@id="sb-sportlist"]/li[1]/ul[@id="lg1"]/li/'
+                          'div[@class="line"]/a/@href').extract()
+
+        # http://www.oddsring.com/betoffer/1/7448 is format of lids, chop:
+        # lids = [link[35:] for link in links]
+        # Make pairs for easy filtering
+        lpairs = zip(lnames, links)
+
+        links = [link for (lname, link) in lpairs
+                 if not leagueFilter(self.name, lname)]
+
+        headers = {'Referer': 'http://www.oddsring.com'}
+        # Build request for leagues
+        # I seem to be having a problem with cookies
+        # If you make the request w.o them you get 302 redirect
+        # , which is not being coped with well. How do I cope with it?
+        # or why are the cookies not working consistently?
+        for link in links:
+            yield Request(url=link, headers=headers,
+                          callback=self.parseData, dont_filter=True)
+
+    def parseData(self, response):
+
+        print ("[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m"
+               % (self.name, response.url[20:]))
+
+        sel = Selector(response)
+
+        # First row is just league heading,and you want to exclude
+        # 'sep' class rows.
+        eventSelection = sel.xpath('//table[@class="ComingUPTable"]/tr'
+                                   '[position()>1][not(@class="moreEvent")]')
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+
+            # event name
+            item['eventName'] = event.xpath('td[3]/div/a/text()').extract()
+            if item['eventName']:
+                teams = item['eventName'][0].split(' - ')
+                teams = [team.strip() for team in teams]
+                item['eventName'] = [' V '.join(teams)]
+
+            # datetime
+            dateandtime = event.xpath('td[2]/text()').extract()
+            # Format is [u'29/06 16:00']
+            try:
+                date = [datetime.datetime.strptime(dateandtime[0], '%d/%m %H:%M').strftime('%m %d')]
+                time = [datetime.datetime.strptime(dateandtime[0], '%d/%m %H:%M').strftime('%H:%M')]
+            except ValueError as e:
+                print ("[ERROR %s]: \033[7m\033[31m ValueError: %s for URL:"
+                       "%s \033[0m" % (self.name, e, response.url[20:]))
+                print ("[ERROR %s]: \033[7m\033[31m Date dump: %s."
+                       " SKIP. \033[0m" % (self.name, dateandtime))
+                if item['eventName']:
+                    print ("[ERROR %s]: \033[7m\033[31m eventName: %s."
+                           " \033[0m" % (self.name, item['eventName']))
+                    continue
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            # Odds
+            item['odd1'] = event.xpath('td[starts-with(@class, "home")]/'
+                                       'div[@class="val"]/a/text()').extract()
+
+            item['odd3'] = event.xpath('td[starts-with(@class, "draw")]/'
+                                       'div[@class="val"]/a/text()').extract()
+
+            item['odd2'] = event.xpath('td[starts-with(@class, "away")]/'
+                                       'div[@class="val"]/a/text()').extract()
+            items.append(item)
+        return items

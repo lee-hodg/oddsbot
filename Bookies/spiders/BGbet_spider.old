@@ -1,0 +1,65 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class BGbetSpider(Spider):
+    name = "BGbet"
+    allowed_domains = ["bgbet.com"]
+
+    #BGbet has url with everything listed (excellent)
+    start_urls=['http://www.bgbet.com/events/football.aspx']
+
+    download_timeout = 120  #BGbet sometimes needs longer than settings timeout
+
+    def parse(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        sel = Selector(response)
+        compSelection = sel.xpath('//div[@class="competitionContainer"]')
+
+        items = []
+
+        for comp in compSelection:
+            #get comp blockdate
+            #a comp may have mult date blocks
+            nodes=comp.xpath('*') #all nodes for comp
+            blockdate =[]
+            for n in nodes:
+                # NB e.g. n now refers to <h3 class="competitionHeader">World Cup</h3>
+                # so doing n.xpath('h3') does not work, as no child h3, the node IS h3!
+                if n.xpath('self::h3[@class="competitionHeader"]/text()').extract():
+                    compname = n.xpath('self::h3[@class="competitionHeader"]/text()').extract()
+                    print "[INFO %s]: \033[7m Scraping data for compname: %s \033[0m" % (self.name,compname)
+                elif n.xpath('self::h4[@class="dateHeader"]/text()').extract():
+                    blockdate = n.xpath('self::h4[@class="dateHeader"]/text()').extract() #[u'12/06/2014']
+                    blockdate = [datetime.datetime.strptime(blockdate[0], '%d/%m/%Y').strftime('%m %d')]
+                elif n.xpath('self::div[@class=" oddLine" or " evenLine"]'):
+                    #we have an event
+                    item = EventItem()
+                    #date and time
+                    date = blockdate
+                    time = n.xpath('self::div[@class=" oddLine" or " evenLine"]/div/span[@class="kickOffTime"]/text()').extract()
+                    item['eventDate'] = date
+                    item['eventTime'] = time
+
+                    # event name
+                    item['eventName'] = n.xpath('self::div[@class=" oddLine" or " evenLine"]/div/span[@class="marketName"]/text()').extract()
+
+                    # odds
+                    item['odd1'] = n.xpath('self::div[@class=" oddLine" or " evenLine"]/div/span[@class="homeOdds"]/text()').extract()
+                    item['odd3'] = n.xpath('self::div[@class=" oddLine" or " evenLine"]/div/span[@class="drawOdds"]/text()').extract()
+                    item['odd2'] = n.xpath('self::div[@class=" oddLine" or " evenLine"]/div/span[@class="awayOdds"]/text()').extract()
+
+                    items.append(item)  #only append if at least one odd found
+        return items

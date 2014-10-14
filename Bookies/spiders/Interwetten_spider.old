@@ -1,0 +1,173 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+# since no bookie will list the year,we work
+# with only month and date in the 12 31 format
+# so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now()  # datetime obj, will need str later with .strftime('%m %d')
+
+#
+#  It seems that Interwetten has a cookie system that persists
+#  the state of leagues you selected so far. This is a pain,
+#  as it means after visiting say Prem league then serie-A, you
+#  end up with not just serie-A but also Prem league, then duplicate scrape.
+#  1) Vist all links with HEAD method of req to just set cookies,
+#     then scrape data on last link, when cookies set should ensure
+#     we get a page with all the leagues visited so far.
+#     (works pretty well but could the HEAD req get me banned?)
+#  2) Pop the _lb cookie that keeps track after each league.
+#  3) The new method here instead makes the mosts of the `select all`
+#     method from the fussball page of leagues, which just captures league ids
+#     from input checkboxes and requests them all at once as usual.
+
+def leagueFilter(name, link):
+    #
+    #  If any of these phrases in the link
+    #  we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['special',
+                   'long-term',
+                   'wc-',
+                   'european-championship',
+                   'o/10/football',
+                   'final',
+                   'group-winner',
+                   'outrights',
+                   ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        # don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print ("[INFO %s]: \033[7m Filtering out link: %s \033[0m"
+                   % (name, link[30:]))
+            return True
+
+    return False  # don't filter rest
+
+
+class InterwettenSpider(Spider):
+    name = "Interwetten"
+    allowed_domains = ["interwetten.com"]
+    start_urls = ['https://www.interwetten.com/en/sportsbook/o/10/fussball']
+
+    # custom settings for Interwetten to stop timeouts
+    download_timeout = 40  #make this longer than settings for Interwetten
+    download_delay = 1
+    max_concurrent_requests = 2
+
+    #  First get the league links
+    def parse(self, response):
+        sel = Selector(response)
+        # league_links = sel.xpath('//td[@class="colleft"]/'
+        #                         'div[@class="box list koslist"]'
+        #                         '/div[@id="divSubMenu_10"]//a/@href').extract()
+        # checkbox ids
+        cbids = sel.xpath('//table[@id="TBL_Content_Leagues"]'
+                              '/tr/td/input/@id').extract()
+        leagueids = [cbid[2:] for cbid in cbids]  # drop cb prefix
+        leaguenames = sel.xpath('//table[@id="TBL_Content_Leagues"]'
+                                '/tr/td/a/text()').extract()
+        lpairs = zip(leagueids, leaguenames)
+        # remove unwanted links, returns True to filter out link
+        leagueids = [id for (id, name) in lpairs
+                        if not leagueFilter(self.name, name)]
+
+        base_url = 'https://www.interwetten.com/en/SportsBook/Betting/BettingOffer.aspx'
+        GETstr = '?leagueid='+','.join(leagueids)+'&type=0&ogPreselect=1'
+        headers = {'Host': 'www.interwetten.com',
+                   'Referer': 'https://www.interwetten.com/en/sportsbook/o/10/fussball',
+                   }
+
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parse_Data, dont_filter=True)
+
+
+    def parse_Data(self, response):
+
+        print ("[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m"
+               % (self.name,response.url[20:]))
+        sel = Selector(response)
+
+        # Interwitten has very annoying display for each league,
+        # with all events of certain date under that date block head.
+        tableRows = sel.xpath('//table//tr')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        blockdate = []
+        items = []
+        for row in tableRows:
+            rowdate = row.xpath('td[@class="playtime"]/p/text()').extract()
+            if rowdate !=[]:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate
+                 #print 'DEBUG: UPDATING BLOCKDATE:', blockdate
+
+            else:
+                # Else test if this is an 'event' row, using time as
+                #  criteria.
+                #
+                # NB. Oddly they use class 'date' for the time and 'playtime'
+                # for the date, shrug.
+               rowtime = row.xpath('td[@class="date"]/text()').extract()
+               if rowtime !=[]:
+                       # We have event.
+
+                       item = EventItem()
+                       date = blockdate
+                       time = rowtime
+
+                       # Remember xpath returns lists, so we
+                       # must strip using code below, if non-zero
+                       time = [x.strip() for x in time]
+                       date = [x.strip() for x in date]
+
+                       # Format date and time as desired
+                       # Interwetten uses '08.03.2014 and '23:30'
+                       if  "Tomorrow" in date:
+                           tmoz = today + datetime.timedelta(days=1)
+                           date = [tmoz.strftime('%m %d')]
+                       elif  "Today" in date:
+                           date = [today.strftime('%m %d')]
+                       elif date != []:
+                           date = [datetime.datetime.strptime(date[0], '%d.%m.%Y').strftime('%m %d')]
+
+                       # Set date and time
+                       item['eventDate'] = date
+                       item['eventTime'] = time #time already 24hr for interwetten
+
+
+                       # EventName. Remember this will be the name within a list
+                       item['eventName'] = []
+                       team1 = row.xpath('td[@class="bets"]/table//tr/td[1]/'
+                                         'p/span/text()').extract()
+                       team2 = row.xpath('td[@class="bets"]/table//tr/td[3]'
+                                         '/p/span/text()').extract()
+                       if team1 and team2:
+                           item['eventName'] = [team1[0]+' V '+team2[0]]
+
+                       # Price date.
+                       item['odd1'] = [];item['odd3'] = [];item['odd2'] = [];
+                       item['odd1'] = row.xpath('td[@class="bets"]/table//tr'
+                                                '/td[1]/p/strong/text()').extract()
+                       item['odd3'] = row.xpath('td[@class="bets"]/table//tr/'
+                                                'td[2]/p/strong/text()').extract()
+                       item['odd2'] = row.xpath('td[@class="bets"]/table//tr/'
+                                                'td[3]/p/strong/text()').extract()
+                       items.append(item)  # Validate in pipelines.py
+
+        return items
+
+

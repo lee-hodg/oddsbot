@@ -1,0 +1,90 @@
+sites = sel.xpath('//table[@class="PluginBettingOddsTable PluginBettingOddsTableSports"]//tr//td[2]/a/text()').extract()
+
+use links found from site 
+
+yesterday: https://www.buzzpoker.com/_betting/getCenterColumn/displayEventsFromCategory/7&55&0&0&0&0?_=1392161562176
+today: https://www.buzzpoker.com/_betting/getCenterColumn/displayEventsFromCategory/7&55&0&0&0&0?_=1392194751684
+
+both still load but odds change.
+
+Looks like the internal numbering follows the pattern:
+Sport, Country, Competition, Event
+
+Football=7,
+Eng=55, Fr=44,Gr=45,It=46
+Premier League=67,.....
+.
+.
+
+
+Chrome ctrl+sift+j, scripts seemed to show the scripts nicely for me and the cookies.
+
+Betting.js is important one.
+
+
+They use a system of cookies to keep track of what should be shown in the centre pane (
+and other panes for that matter):
+Name                       Value    Expires
+BettingSelectedSport       7
+and these cookies and erased and recreated when the onClick displayEventsFromCategory()
+etc are called, when user clicks in menu etc.
+
+
+Scroll down to the CENTRE section of betting.js
+
+all cookies are read to determine what to display:
+
+selectedSport = readCookie('BettingSelectedSport');
+    var selectedCategory = readCookie('BettingSelectedCategory');
+    var selectedCompetition = readCookie('BettingSelectedCompetition');
+    var selectedEvent = readCookie('BettingSelectedEvent');
+    var selectedLiveNowEvent = readCookie('BettingSelectedLiveNowEvent');
+
+Then URL to load in centre is constructed:
+
+var loadUrl = "/_betting/getCenterColumn/" + centerStateCookie + "/" + selectedSport + "&" + selectedCategory + "&" + selectedCompetition + "&" + selectedEvent + "&" + selectedLiveNowEvent + "&" + expandBetNbrInActiveSettledBets;
+
+
+===================
+
+Looks like the final set of numbers is a timestamp automatically added by jquery to prevent "caching" (which I think means prevents the user storing old copy of this page, and 
+not getting updated or new odds). It doesn't show in the betting.js, because it is something jquery is doing automatically if caching set false (which is default for some ttypes).
+
+Just use cache : true. jQuery will automatically add a timestamp to the end of the URL for you, making sure that ajax requests are never cached.
+
+from jquery docs
+
+    Default: true, false for dataType 'script' and 'jsonp'
+    If set to false, it will force requested pages not to be cached by the browser. Setting cache to false also appends a query string parameter, "_=[TIMESTAMP]", to the URL.
+
+$.ajaxSetup({'cache':true});
+
+
+
+
+
+              /_betting/getCenterColumn/displayEventsFromCategory/7&55&0&0&0&0?_=1392161562176
+
+Ok but what is the ?_=1392161562176 bit?
+
+
+
+
+================================
+
+Finally the centre div #PluginBettingCenterContent" is updated from the server with an AJAX call with:
+
+$("#PluginBettingCenterContent").html(ajax_load).load(loadUrl);
+
+==============
+
+
+Looks like on  window.onload = function (evt) {oldOnload(); bettingSetup(); };
+is the entry point . Initial cookies are created. We then call updates for all divs.
+Then for centre, this reads cookies, constructs URL, and calls ajax with it to load content in
+the specified div. (with a little whirly gif loaded first by ajax whilst we wait)
+
+
+
+
+

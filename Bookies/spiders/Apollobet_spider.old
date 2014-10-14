@@ -1,0 +1,171 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime, re
+import dateutil.parser #since they use ordinal date 1st, 2nd..
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#%m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+class ApollobetSpider(Spider):
+    name = "Apollobet"
+
+    # This needs to be disabled when making extra requests
+    #allowed_domains = ["apollobet.com"] 
+    
+    # The initial visit to /Betting will set X-mapping nd SessionId
+    # cookies, but it is only when the sports tab is clicked that it calls
+    # the js function ShowSports('') and in turn this sets cookie with
+    # SetCookie func seensplash-sports=1 with exp date of 30 days
+    start_urls = ['http://www.apollobet.com/Betting'] 
+
+    #you must retain the name 'parse' with basic spider!   
+    def parse(self, response):
+        # set the seen-splash cookie
+        yield Request(url="http://www.apollobet.com/Betting",
+                               cookies={'seensplash-sports': '1'},
+                               headers= {'Referer':'http://www.apollobet.com/Betting'},
+                               callback=self.pre_parse_countries)
+
+
+    def pre_parse_countries(self, response):  
+        #make request for league links
+        base_url =  'http://www.apollobet.com/SportsBook/GetMenuItem'
+        GETstr = '?navigationID=127797.1&level=2&name=A%20-%20Z&parentName=23.1&parentNames=Football/&parentIds=23.1,'
+        headers= { 'Referer': 'http://www.apollobet.com/Betting/Football?navigationid=top,23.1&time=160234',
+                   'X-Requested-With': 'XMLHttpRequest'}
+
+        #scrapy seems to now take care of seensplash-sports cookie and the __RequestVerificationToken_Lw__ cookie
+        yield Request(url=base_url+GETstr,
+                               #cookies={'seensplash-sports': '1'},
+                               headers= headers,
+                               callback=self.parse_countries)
+
+    def parse_countries(self, response):  
+       
+        sel = Selector(response)
+
+        #get js onclick methods e.g.
+        # u"expandMenu('127875.1','3','England','A - Z','Football/A_-_Z/','23.1,127797.1,')" 	
+        # expandMenu(navID, menuLevel, name, parentName, parentNames, parentsIds) (see sportsbook.js?vers2.1)
+	country_methods = sel.xpath('//ul[@id="leftNav"]//li/span/a/@onclick').extract()
+
+        #use regex to get the desired params from the onClicks, and put into nice dict
+        p=re.compile(r"expandMenu\(\'(?P<navID>.+)\',\'(?P<menuLevel>.+)\',\'(?P<name>.+)\',\'(?P<parentName>.+)\',\'(?P<parentNames>.+)\',\'(?P<parentIDs>.+)\'\)")
+        countryList = []
+        for c in country_methods:
+            m = p.match(c)
+            country = {}
+            country['navID'] = m.group('navID')
+            country['menuLevel'] = m.group('menuLevel')
+            country['name'] = m.group('name')
+            country['parentName'] = m.group('parentName')
+            country['parentNames'] = m.group('parentNames')
+            country['parentIDs'] = m.group('parentIDs')
+            countryList.append(country)
+
+
+        # for each country we make a further request to get submenu of leagues
+        base_url = 'http://www.apollobet.com/SportsBook/GetMenuItem'
+        headers = {'Referer': 'http://www.apollobet.com/Betting/Football?navigationid=top,23.1&time=160234',
+                   'X-Requested-With': 'XMLHttpRequest'}
+ 
+
+        countryf=open(os.path.join(LOG_DIR, self.name + '_countries.log'),'w')
+
+	for country in countryList:
+            GETstr = '?navigationID='+country['navID']+'&level='+country['menuLevel']+'&name='+country['name']+'&'
+            GETstr += 'parentName='+country['parentName']+'&parentNames='+country['parentNames']+'&parentIds='+country['parentIDs']
+            print >>countryf,base_url+GETstr
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self, response):  
+       
+        sel = Selector(response)
+
+        # we could do a similar thing now to traverse all leagues, but the matches href is sufficient
+        matches_link = sel.xpath('//ul[@id="leftNav"]//li/span/a/@href').extract()
+
+        leaguef=open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'a') #needs to be 'a' otherwise will rewrite over each call from countries
+        if matches_link:
+            url = 'http://www.apollobet.com'+matches_link[0]
+            print>>leaguef, url
+            headers = {'Referer': 'http://www.apollobet.com/Betting/Football?navigationid=top,23.1&time=160234'}
+            yield Request(url=url, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        sel = Selector(response)
+
+        tableRows = sel.xpath('//table[@class="markettable"]//tr')
+
+        # For all rows under with no date will use latest blockdate,C
+        # single item list to match xpath extract
+        blockdate = []
+        items = []
+        for row in tableRows:
+            
+            rowdate = row.xpath('td[@class="iconcell"]/text()').extract()
+            if rowdate:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate
+                 print "[INFO %s]: Updating blockdate: \033[7m %s \033[0m" % (self.name,blockdate)
+                 continue
+            else:
+                # Else test if this is an 'event' row, using time as
+                # criteria.
+                #
+               rowtime = row.xpath('td[@class="firstcol"]/text()').extract()
+               if rowtime:
+                   # we have an event
+                   #print 'We have event with rowtime: \033[7m %s \033[0m' % rowtime
+                   
+                   event=row
+
+                   item = EventItem()
+                   date = blockdate
+                   time = rowtime
+
+                   #eventName, get @title not text() as text is often abbreviated with ...
+                   item['eventName'] = event.xpath('td[@class="secondcol"]/span/a/@title').extract()
+
+                   # Remember xpath returns lists, so we
+                   # must strip using code below, if non-zero
+                   time = [x.strip() for x in time]
+                   date = [x.strip() for x in date]
+
+                   # Format date and time as desired 
+                   # Apollobet uses Saturday 29th of March 2014
+                   if  "Tomorrow" in date:
+                       tmoz = today + datetime.timedelta(days=1)
+                       date = [tmoz.strftime('%m %d')]
+                   elif  "Today" in date:
+                       date = [today.strftime('%m %d')]
+                   elif date != []:
+                       #29th Mar
+                       #remove ordinal suffix (see jenningsbet)
+                       date_parsed = dateutil.parser.parse(date[0])
+                       date = [date_parsed.strftime('%m %d')]
+
+                   # Set date and time
+                   item['eventDate'] = date
+                   item['eventTime'] = time #time already 24hr for Apollobet
+
+                   #print 'EventName: \033[7m %s \033[0m' % item['eventName']
+                   # odds
+                   item['odd1'] = event.xpath('td[@class="thirdcol"]/table/tr/td[@class="pricecol1"]/label/input/@value').extract()
+                   item['odd3'] = event.xpath('td[@class="thirdcol"]/table/tr/td[@class="pricecol2"]/label/input/@value').extract() #draw
+                   item['odd2'] = event.xpath('td[@class="thirdcol"]/table/tr/td[@class="pricecol3"]/label/input/@value').extract()
+
+                   items.append(item)  #Validation done in pipeline.py
+        return items
+
+
+

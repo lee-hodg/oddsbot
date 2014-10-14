@@ -1,0 +1,170 @@
+LADBROKES sportsbeta (you could prob scrape the sports regular more easily):
+
+When you press something like "see all", you send a POST request to the server 
+(these are to addresses like /view/....). It's necessary to have in your header the
+referer as `http://sportsbeta.ladbrokes.com/football` (user agent is not necessary it seems).
+You then have the actual form data too , things like type=ajaxrequest and pageId=p_football_home_page.
+
+Some of this form data is url percent encoded, e.g. facetCount_157%23325=8, where
+`%23` stands for #. Whilst cURL takes these as is in the header, when you use python
+with the requests library you need to actually replace with the #, like facetCount_157#325=8
+when building the payload.(I guess requests is already trying to take care of such escaping)#!/usr/bin/python
+"In cURL, you send POST *data*. Requests serializes the dictionary into the same format. I think you can also pass a string instead of a dictionary and Requests will send it as-is"
+
+from requests import Session
+
+session = Session()
+
+# HEAD requests ask for *just* the headers, which is all you need to grab the
+# session cookie
+session.head('http://sportsbeta.ladbrokes.com/football')
+
+response = session.post(
+    url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController',
+    data={
+        'N': '4294966750',
+        'form-trigger': 'moreId',
+        'moreId': '156#327',
+        'pageType': 'EventClass'
+    },
+    headers={
+        'Referer': 'http://sportsbeta.ladbrokes.com/football'
+    }
+)
+
+print response.text
+
+
+
+You also need a session cookie to say you really did come from the /football homepage, so
+in python requests it is necessary to use sessions to set the session cookie first, and in cURL
+you need to pass a valid cookie in the header.
+
+###########cURL###############################################
+(note you need --compressed at end to decrompress the gzip or deflate with cURL, in python
+requests lib does this auto (urllib2 does not))
+
+You can use Firebug or chrome to right click the ladbrokes request and get a cURL:
+
+curl 'http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController'  -H 'Cookie: JSESSIONID=DE93158F07E02DD3CC1CC32B1AA24A9E.ecomprodsw015; geoCode=FRA; FLAGS=en|en|uk|default|ODDS|0|GBP; ECOM_BETA_SPORTS=1; PLAYED=4%7C0%7C0%7C0%7C0%7C0%7C0' -H 'Referer: http://sportsbeta.ladbrokes.com/football' -H 'User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:27.0) Gecko/20100101 Firefox/27.0'  --data 'facetCount_157%23325=8&moreId=156%23327&facetCount_156%23327=12&event=&N=4294966750&pageType=EventClass&pageId=p_football_home_page&type=ajaxrequest&eventIDNav=&removedSelectionNav=&currentSelectedId=&form-trigger=moreId' --compressed
+
+You can replace the JSESS cookie with the one from python requests session, and the curl still goes through correctly.
+
+also works without the PLAYED cookie etc:
+
+ curl 'http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController'  -H 'Cookie: JSESSIONID=016376B6474D9CD36209C55FE46A1AEC.ecomprodsw012; geoCode=FRA; FLAGS=en|en|uk|default|ODDS|0|GBP; ECOM_BETA_SPORTS=1'  -H 'Referer: http://sportsbeta.ladbrokes.com/football' -H 'User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:27.0) Gecko/20100101 Firefox/27.0'  --data 'facetCount_157%23325=8&moreId=156%23327&facetCount_156%23327=12&event=&N=4294966750&pageType=EventClass&pageId=p_football_home_page&type=ajaxrequest&eventIDNav=&removedSelectionNav=&currentSelectedId=&form-trigger=moreId' --compressed
+
+###################################################################
+
+####################python requests Min############################
+#!/usr/bin/python
+
+from requests import Session
+
+session = Session()
+
+# HEAD requests ask for *just* the headers, which is all you need to grab the
+# session cookie
+session.head('http://sportsbeta.ladbrokes.com/football')
+
+response = session.post(
+    url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController',
+    data={
+        'N': '4294966750',
+        'form-trigger': 'moreId',
+        'moreId': '156#327',
+        'pageType': 'EventClass'
+    },
+    headers={
+        'Referer': 'http://sportsbeta.ladbrokes.com/football'
+    }
+)
+
+print response.text
+
+##########################################################################
+
+#############Scrapy#######################################################
+
+<noyov>maybe you need a seesion? (CookieMiddleware)
+
+<blender>if you're doing this with Scrapy, a
+ll you need to do is add "http://sportsbeta.ladbrokes.com/football" to your start urls and *then* send this request
+
+the API rejects the request if you don't have a valid session cookie, so you need to grab one before sending it
+
+something like this 
+
+from scrapy.http import Request, FormRequest
+def start_requests(self):
+    yield Request(
+    url='http://sportsbeta.ladbrokes.com/football',
+    callback=self.request_links
+    )
+def request_links(self, response):
+    yield FormRequest(
+    url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController',
+    formdata={...}
+    )
+ 
+ if you're subclassing CrawlSpider, your rules should work just fine from here
+I don't remember if you need to pass `callback=self.parse` or something to the FormRequest
+
+#####################################Some experiments in the scrapy shell#####################
+
+so scrapy should auto manage session cookies for me.
+
+#first visit the football homepage to set the needed cookie:
+scrapy shell 'http://sportsbeta.ladbrokes.com/football'
+
+Then we use FormReqest
+
+from scrapy.http import FormRequest
+
+url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController'
+data={'N': '4294966750',
+ 'form-trigger': 'moreId',
+ 'moreId': '156#327',
+ 'pageType': 'EventClass'}
+headers={'Referer': 'http://sportsbeta.ladbrokes.com/football'}
+
+req=FormRequest(url, formdata=data, headers=headers)
+
+you can then use fetch in the shell, to get new selectors etc for this req
+
+fetch(req)
+
+now response.body has the data we want!! Excellent
+
+sel.xpath('//div[@class="on"]/ul//li/a/@href').extract()
+
+u'/International/Algarve-Cup/Football-N-1z13ycfZ1z0t3yuZ1z141jy/',
+ u'/Argentinian/Argentina-Primera-Division/Football-N-1z13rzrZ1z13nbgZ1z141jy/',
+ u'/Argentinian/Argentinian-Primera-B-Metropolitana/Football-N-1z13rzrZ1z13btrZ1z141jy/',
+ u'/Argentinian/Argentinian-Reserve-Leagues/Football-N-1z13rzrZ1z0u4hqZ1z141jy/',
+ u'/International/Asian-Games/Football-N-1z13ycfZ1z112q1Z1z141jy/',
+ u'/Austrian/Austrian-Bundesliga/Football-N-1z13rzdZ1z13o23Z1z141jy/',
+ u'/Austrian-Erste-Liga/Football-N-1z13rziZ1z141jy/',
+ u'/Belgian/Belgacom-League/Football-N-1z13s40Z1z131tyZ1z141jy/',
+ u'/Brazilian/Brazilian-State-Leagues/Football-N-1z13vsqZ1z0wgehZ1z141jy/',
+.
+.
+.
+Now you can just use the link extractor:
+
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+s=SgmlLinkExtractor()  #put reg expression in here with allow=[...] if you want to match certain *absolute* links, but for us it matters little as all links good.
+links=s.extract_links(response) #pass it the response
+
+links:
+[Link(url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController', text=u'', fragment='', nofollow=False),
+ Link(url='http://sportsbeta.ladbrokes.com/International/Algarve-Cup/Football-N-1z13ycfZ1z0t3yuZ1z141jy/', text=u'Algarve Cup', fragment='', nofollow=False),
+.
+.
+.]
+
+
+
+scrapy crawl LadCSpider -o LadC_items.json -t json
+
+

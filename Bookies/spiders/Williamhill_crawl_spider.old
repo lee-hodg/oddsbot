@@ -1,0 +1,136 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import CrawlSpider, Rule
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+
+class WilliamhillCrawlSpider(CrawlSpider):
+    name = "Williamhill"
+    allowed_domains = ["williamhill.com"]
+    start_urls = ["http://sports.williamhill.com/bet/en-gb/betting/y/5/et/Football.html"]
+
+    #typical URL: http://sports.williamhill.com/bet/en-gb/betting/t/2092/Club%2dFriendlies.html
+    rules = [Rule(SgmlLinkExtractor(allow= [r'http://sports\.williamhill\.com/bet/en-gb/betting/t/\d+/[a-zA-Z0-9%]+\.html']), 'parse_match')]
+
+    def parse_match(self, response):
+        sel = Selector(response)
+	
+	with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'a') as linksf:
+	    print >> linksf, 'Response url is:', response.url, ' and status is:', response.status, ' redirected number:', response.meta.get('redirect_times')
+        
+	eventSelection = sel.xpath('//table[@class="tableData"]/tbody//tr')
+
+        # Need to implement this:
+        #make sure only getting 'Match Betting' (sometimes we have event link with ht/ft etc)
+        #tableTitle = sel.xpath('//table[@class="tableData"]/thead//tr/th[@class="leftPad title"]/span/text()').extract()
+
+        items = []
+ 
+        if (response.url.endswith('Outright.html') or response.url.endswith('Trophy.html')):          
+             # Not interested, bail.
+             # Can't filter this at rules level earlier, because of redirect name change of link.
+             return items
+
+	if response.meta.get('redirect_times') is not None:
+	    # WilliamHill redirects for markets with single event, must handle differently.
+            print '[INFO %s]: \033[34m Scraping redirected site: %s \033[0m' % (self.name,response.url)
+            #wait = raw_input("PRESS ENTER TO CONTINUE...")
+
+            for event in eventSelection:
+         	    item = EventItem()
+                    
+
+                    #sometimes single event starting soon, and sometimes live currently		
+                    dateandtime=sel.xpath('//div[@id="contentHead"]/span[@id="eventDetailsHeader"]/nobr/span/text()').extract()
+                    dateandtime=[dt.strip() for dt in dateandtime]
+                    if dateandtime and dateandtime !=['']:
+                        time = [dateandtime[0][-8:-3]]
+                        date = [dateandtime[0][12:18]]
+                        try:
+                            date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+                        except ValueError as e:
+                            print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                            print "[ERROR %s]: \033[7m\033[31m Tried d b no luck \033[0m" % (self.name)
+                            print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+                            continue
+                    else:
+                        continue
+
+                    item['eventDate'] = date
+                    item['eventTime'] = time
+                    
+                    team1 = event.xpath('td[1]/div/div[@class="eventselection"]/text()').extract()
+                    team2 = event.xpath('td[3]/div/div[@class="eventselection"]/text()').extract()
+                    item['eventName'] =[]
+                    if team1 and team2:
+                        item['eventName'] = [team1[0]+' v '+team2[0]]
+
+       		    item['odd1'] = event.xpath('td[1]/div/div[@class="eventprice"]/text()').extract() 
+                    item['odd3'] = event.xpath('td[2]/div/div[@class="eventprice"]/text()').extract() #our conv is odd3 is draw
+                    item['odd2'] = event.xpath('td[3]/div/div[@class="eventprice"]/text()').extract()
+
+                    items.append(item)  #validation in pipelines.py   
+
+	else:	  
+            print '[INFO %s]: \033[7m Scraping non-redirected site: %s \033[0m' % (self.name,response.url)
+
+            for event in eventSelection:
+                    item = EventItem()
+
+                    date = event.xpath('td[1]/span/text()').extract()
+		    time = event.xpath('td[2]/span/text()').extract()
+                 
+                    if date == [] and time ==[]:
+                        # perhaps Live At sel with diff format
+                        # values put in by js, but we can still detect 
+                        # if Live At at least
+                        date = event.xpath('td[1]/a[@class="liveat"]')
+                        if date: 
+                            date = ['Live At']
+                            time = ['']
+                    # sel.xpath returns lists (even single item list)
+                    # thus necessary to format like this.
+                    time = [x.strip() for x in time]
+                    date = [x.strip() for x in date]
+
+                    if not date:
+                        # Assume today (as often bookies miss date if event today)
+                        date = [today.strftime('%m %d')]
+                    elif  "Tomorrow" in date:
+                        tmoz = today + datetime.timedelta(days=1)
+                        date = [tmoz.strftime('%m %d')]
+                    elif  "Today" in date:
+                        date = [today.strftime('%m %d')]
+                    elif  date == ['Live At']:
+                        date = [today.strftime('%m %d')]
+                    elif date != []:
+                        # Standarise formatting frp, %d %b (09 Mar) to %m %d (09 03)
+                        # convert to datetime obj first then back to desired str
+                        date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+                    if time: #not []
+                        # Wh time is like 14:00 CET %H:%M %Z, but sometimes 12:35 UK too => chop timezone
+                        if time != ['']:
+                            time[0] = time[0][:5]
+                            time = [datetime.datetime.strptime(time[0], '%H:%M').strftime('%H:%M')]
+
+                    item['eventDate'] = date
+                    item['eventTime'] = time
+
+                    item['eventName'] = event.xpath('td[3]/a/span/text()').extract()
+		    item['odd1'] = event.xpath('td[5]/div/div[@class="eventprice"]/text()').extract()
+		    item['odd3'] = event.xpath('td[6]/div/div[@class="eventprice"]/text()').extract() #our conv is odd3 is draw
+		    item['odd2'] = event.xpath('td[7]/div/div[@class="eventprice"]/text()').extract()
+
+                    items.append(item)  #validation in pipelines.py
+
+        return items
+

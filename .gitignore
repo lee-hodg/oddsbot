@@ -1,0 +1,11 @@
+*.pyc
+junk/
+venv/
+JSONdata/
+logs/
+*.json
+*.html
+*.txt
+*.swp
+local_settings.py
+similiarStrings.txt

@@ -1,0 +1,133 @@
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class SportingbetSpider(Spider):
+    name = "Sportingbet"
+    allowed_domains = ["sportingbet.com"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='http://www.sportingbet.com/sports-football/0-102-410.html',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+
+        sel = Selector(response)
+
+        sx = SgmlLinkExtractor(allow=[r'http://www.sportingbet.com/sports-football/[A-Za-z0-9-]+/1-102-\d+.html'
+                                     ])
+
+        league_links = sx.extract_links(response)
+
+        eventClassIdList=[]
+        # Extract eventClassId from the link.url with regex
+        for link in league_links:
+            print link.url
+            matches=re.findall(r'http://www.sportingbet.com/sports-football/[A-Za-z0-9-]+/1-102-(\d+?).html',link.url)
+            if matches:
+                eventClassIdList.append(matches[0])
+
+        print eventClassIdList
+
+        for eventClassId in eventClassIdList:
+
+            # Now for each league link, we want to make an ajax GET request to server
+            # in order to receive raw XML back. Setting cookie on leagues page should allow this.
+            base_url='http://www.sportingbet.com/services/CouponTemplate.mvc/GetCoupon'
+            GETstr  = '?couponAction=EVENTCLASSCOUPON&'
+            GETstr += 'sportIds=102&'
+            GETstr += 'marketTypeId=&'
+            GETstr += 'eventId=&'
+            GETstr += 'bookId=&'
+            GETstr += 'eventClassId='+eventClassId+'&'
+            GETstr += 'sportId=102&'
+            GETstr += 'eventTimeGroup=ETG_NextFewHours_0_0'
+
+            headers={'Content-Type': 'application/x-www-form-urlencoded',
+                     'Referer': 'http://www.sportingbet.com/sports-football/0-102-410.html',
+                     'X-Requested-With': 'XMLHttpRequest'
+                     }
+
+            yield Request(base_url+GETstr, headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print response.body
+"""
+        sel = Selector(response)
+        
+	#Debugging
+        #print '******************************************'
+	#print  'response url is:', response.url #, ' and status is:', response.status, ' redirected number:', response.meta.get('redirect_times')
+        #print '******************************************'
+
+        print "\033[7m Going to parse data for URL: %s \033[0m " % response.url
+
+
+        eventSelection = sel.xpath('//table/tbody//tr')
+
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+            try:
+               # Remember xpath puts everything into list, even if single item.
+               # need to lob off three zeros to make valid date
+               dateandtime = [x.strip()[:-3] for x in event.xpath('td[@class="date"]/span/@data-time').extract()]
+ 
+               if dateandtime:
+                    # Standarise formatting frp, unix stamp to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%m %d')]
+                        time = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%H:%M')]
+                    except ValueError as e:
+                        print '\033[31m\033[7m ValueError %s raised for site: %s \033[0m' % (e,  response.url)
+                        print 'Date and time:', date, time
+               else:
+                   date=[]
+                   time=[]
+
+               item['eventDate'] = date
+               item['eventTime'] = time
+
+               # Get eventName.              
+               item['eventName'] = event.xpath('td[@class="event_description"]/a/text()').extract()
+
+               # Get prices.
+               #item['odd1'] = event.xpath('td[3][@class="outcome_td"]/@data-sort').extract()
+               #item['odd3'] = event.xpath('td[4][@class="outcome_td"]/@data-sort').extract() #our conv is odd3 is draw
+               #item['odd2'] = event.xpath('td[5][@class="outcome_td"]/@data-sort').extract()
+               item['odd1'] = event.xpath('td[3][@class="outcome_td"]/span/a/span/text()').extract()
+               item['odd3'] = event.xpath('td[4][@class="outcome_td"]/span/a/span/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[5][@class="outcome_td"]/span/a/span/text()').extract()
+            except IndexError as e:
+               print '\033[31m\033[7m IndexError %s raised for site: %s \033[0m' % (e,  response.url)
+               exit()
+            else:
+               #no exceptions raised
+               if (item['odd1'] or item['odd2'] or item['odd3']):
+                   items.append(item)  #only append if at least one odd found   
+               elif item['eventName']:
+                   #check out genuine events with no odds
+                   with open('Mcbookie_emptyodds.err','a') as emptyf:
+                       print >>emptyf, 'Event', item['eventName'],' was junked for emptyodds.'
+        return items
+        #with open('Mcbookie_items.txt','a') as itemsf:
+        #    print >> itemsf, '*'*100
+        #    print >> itemsf, 'Response.url:', response.url
+        #    for item in items:
+        #        print >>itemsff, item
+
+
+"""

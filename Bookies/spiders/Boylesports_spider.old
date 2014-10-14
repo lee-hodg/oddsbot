@@ -1,0 +1,155 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re, dateutil
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#c.f. Seaniemac
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class BoylesportsSpider(Spider):
+    name = "Boylesports"
+    allowed_domains = ["boylesports.com"]
+
+    # Visit the homepage first , #time is in format HMS but not needed
+    def start_requests(self):
+        yield Request(
+        url='http://ww1.boylesports.com/Betting/Football?navigationid=top,23.1&time=',
+        callback=self.pre_parse_countries
+        )
+
+    def pre_parse_countries(self, response):  
+
+        sel = Selector(response)
+
+        # Request A-Z football menu
+        base_url = 'http://ww1.boylesports.com'
+        GETstr = '/SportsBook/GetMenuItem?navigationID=127797.1&level=2&name=A - Z&parentName=23.1&parentNames=Football/&parentIds=23.1,'
+        headers = {'Referer': 'http://ww1.boylesports.com/Betting/Football?navigationid=top,23.1&time=',
+                   'X-Requested-With': 'XMLHttpRequest'}
+
+        yield Request(url=base_url+GETstr,headers=headers, callback=self.parse_countries)
+
+    def parse_countries(self,response):
+
+        sel = Selector(response)
+        #country Names:
+        names = sel.xpath('//ul/li/a/text()').extract()
+        #onclicks
+        onclicks = sel.xpath('//ul/li/a/@onclick').extract()
+
+        #use regex to get the desired params from the onClicks, and put into nice dict
+        p=re.compile(r"expandMenu\(\'(?P<navID>.+)\',\'(?P<menuLevel>.+)\',\'(?P<name>.+)\',\'(?P<parentName>.+)\',\'(?P<parentNames>.+)\',\'(?P<parentIDs>.+)\'\)")
+        countryList = []
+        for c in onclicks:
+            m = p.match(c)
+            country = {}
+            country['navID'] = m.group('navID')
+            country['menuLevel'] = m.group('menuLevel')
+            country['name'] = m.group('name')
+            country['parentName'] = m.group('parentName')
+            country['parentNames'] = m.group('parentNames')
+            country['parentIDs'] = m.group('parentIDs')
+            countryList.append(country)
+
+
+        #Request leagues
+        base_url = 'http://ww1.boylesports.com/SportsBook/GetMenuItem'
+        headers = {'Referer': 'http://ww1.boylesports.com/Betting/Football?navigationid=top,23.1&time=',
+                   'X-Requested-With': 'XMLHttpRequest'}
+
+        for country in countryList:
+            GETstr = '?navigationID='+country['navID']+'&level='+country['menuLevel']+'&name='+country['name']+'&'
+            GETstr += 'parentName='+country['parentName']+'&parentNames='+country['parentNames']+'&parentIds='+country['parentIDs']
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self,response):
+
+        sel = Selector(response)
+
+        # we could do a similar thing now to traverse all leagues, but the matches href is sufficient
+        matches_link = sel.xpath('/html/body/ul/li[1]/a/@href').extract()
+
+        base_url = 'http://ww1.boylesports.com'
+        if matches_link:
+            headers = {'Referer': 'http://ww1.boylesports.com/Betting/Football?navigationid=top,23.1&time=',
+                   'X-Requested-With': 'XMLHttpRequest'}
+            yield Request(url=base_url+matches_link[0], headers=headers, callback=self.parse_Data)
+           
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])        
+
+        tableRows = sel.xpath('//div[@id="divMainContent"]/div/section/div/section/div/table/tbody/tr')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        blockdate = []
+        items = []
+        for row in tableRows:
+
+            rowdate = row.xpath('td[@class="title left tabtitle"][1]/span/text()').extract()
+            if rowdate:
+                 #update blockdate if it was a date head row
+                 blockdate = rowdate
+                 print '[INFO %s]: \033[7m  Updating blockdate: %s \033[0m' % (self.name,blockdate)
+                 #wait=raw_input('ENTER TO CONT...')
+                 continue
+            else:
+                # Else test if this is an 'event' row, using time as
+                # criteria.
+                #
+               rowtime = row.xpath('td[1]/span/text()').extract()
+               if rowtime:
+                       # we have an event
+
+                       event=row
+
+                       item = EventItem()
+                       date = blockdate
+                       time = rowtime
+
+                       #eventName, get @title not text() as text is often abbreviated with ...
+                       item['eventName'] = event.xpath('td[2]/span/@title').extract()
+
+                       # Remember xpath returns lists, so we
+                       # must strip using code below, if non-zero
+                       time = [x.strip() for x in time]
+                       date = [x.strip() for x in date]
+
+                       # Format date and time as desired 
+                       # Seaniemac uses Saturday 29th of March 2014
+                       if  "Tomorrow" in date:
+                           tmoz = today + datetime.timedelta(days=1)
+                           date = [tmoz.strftime('%m %d')]
+                       elif  "Today" in date:
+                           date = [today.strftime('%m %d')]
+                       elif date != []:
+                           #29th Mar
+                           #remove ordinal suffix 
+                           date_parsed = dateutil.parser.parse(date[0])
+                           date = [date_parsed.strftime('%m %d')]
+
+                       # Set date and time
+                       item['eventDate'] = date
+                       item['eventTime'] = time #time already 24hr for Seaniemac
+
+                       # odds
+                       item['odd1'] = event.xpath('td[3]/span/text()').extract()
+                       item['odd3'] = event.xpath('td[4]/span/text()').extract() #draw
+                       item['odd2'] = event.xpath('td[5]/span/text()').extract()
+
+                       items.append(item)  #validate in pipelines.py
+
+        return items
+
+
+
+

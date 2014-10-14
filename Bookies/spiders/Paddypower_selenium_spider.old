@@ -1,0 +1,147 @@
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+from selenium import webdriver #render javascript
+from scrapy.http import TextResponse #build response from seleniums source
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#the data seems to come with the initial GET request,
+#but it is stored in the `lb_fb_cpn_init(...)` function
+#, which presumably creates some HTML from it. Thus we seem
+#to have two choices: 1) rip the JSON like data from between
+#the <script> tags of the initial GET, then parse them with some
+#python, or 2) use Selenium webdriver to get the js version of the
+#response. For now let's try (2).
+
+#Selenium is quite slow, and annoying with this popup browser.
+#Is headless PhantomJS driver better?
+
+def leagueFilter(link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['coupon',
+                   'top-matches',
+                   'acca-bonus',
+              	   'uk-both-teams-to-score',
+                   'today-and-tomorrow',
+                   'win-draw-win-both-teams-to-score',
+                   'my-matches',
+                   'football-outrights',
+                   'football-specials',
+                   'teams',
+                   'Germany-Bundesliga-1',   #these are to simply avoid duplicating, we use the germany link, rather than league etc.
+                   'France-Ligue-1',
+                   'spanish-la-liga-matches'
+                   'scottish-league-cup-matches',
+                   'scottish-premiership-matches',
+                   'serie-a'
+                  ]
+    for phrase in junkPhrases:
+        if phrase in link:
+            return True
+     
+    return False
+    
+
+class PaddyPowerSelSpider(Spider):
+    name = "PaddyPowerSel"
+    allowed_domains = ["paddypower.com"]
+
+    start_urls=['http://www.paddypower.com/football/football-matches']
+   
+    #first get the league links
+    def parse(self, response):
+        sel = Selector(response)
+                      
+        league_links =sel.xpath('//ul[@id="nav_quicklinks"]/li[@class="on"]/ul//li/a/@href').extract()
+        #remove unwanted links, returns True to filter out link
+        league_links = [link for link in league_links if not leagueFilter(link)]
+                
+        for link in league_links:
+             yield Request(link, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+        
+
+        print " \033[7m Going to parse data for URL: %s \033[0m " % response.url
+           
+        #using selenium webdriver to load each league with js
+        #from there, proceed as usual.
+	self.br = webdriver.Firefox()
+        self.br.get(response.url)
+        #simulate click to order by league, so datetime is more easily scrapable
+        order_by_button = self.br.find_element_by_xpath('//div[@id="powernav"]/div[@class="cnt"]/div[@id="pnav_sort"]/a[@id="pnav_type"]')
+        order_by_button.click()
+        selenium_response = TextResponse(url = '', body = self.br.page_source, encoding = 'utf-8')
+        #proceed as normal with the nicely configured selenium response
+        sel = Selector(selenium_response)
+        
+        eventSelection = sel.xpath('//div[@class="pp_fb_event "]')
+
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+            eventName = event.xpath('div[@class="fb_event_name"]/p/a/text()').extract()
+            print 'EVENT NAME IS: ', eventName
+        """
+            try:
+               time = event.xpath('td[@class="time coupon-scoreboard"]/div/span[@class="time"]/text()').extract()
+               date = event.xpath('td[@class="time coupon-scoreboard"]/div/span[@class="date"]/text()').extract()
+
+               #everything gets formatted into a one item list (link xpath extract rtns list so this makes life easier with empty lists)
+               #in order to strip() contents list contents should they exist, but still retain in list:
+               time = [x.strip() for x in time]
+               date = [x.strip() for x in date]
+ 
+               if not date:
+                    #assume today (as often bookies miss date if event today)
+                    date = [today.strftime('%m %d')]
+               elif  "Tomorrow" in date:
+                    tmoz = today + datetime.timedelta(days=1)
+                    date = [tmoz.strftime('%m %d')]
+               elif  "Today" in date:
+                    tmoz = today + datetime.timedelta(days=1)
+                    date = [tmoz.strftime('%m %d')]
+               elif date != []:
+                    #standarise formatting frp, %d %b (09 Mar) to %m %d (09 03)
+                     #convert to datetime obj first then back to desired str
+                    date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+               item['eventDate'] = date
+               item['eventTime'] = time
+               
+               #remember this will be the name within a list
+               team1 = event.xpath('td[4][@class="seln "]/div/button/span/span[@class="seln-name"]/span/text()').extract()
+               team2 = event.xpath('td[6][@class="seln "]/div/button/span/span[@class="seln-name"]/span/text()').extract()
+               if team1 and team2:
+                   item['eventName'] = [team1[0]+' V '+team2[0]]
+
+               item['odd1'] = event.xpath('td[4][@class="seln "]/div/button/span/span[@class="price frac"]/text()').extract()
+               item['odd3'] = event.xpath('td[5][@class="seln seln_sort-D"]/div/button/span/span[@class="price frac"]/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[6][@class="seln "]/div/button/span/span[@class="price frac"]/text()').extract()
+            except IndexError as e:
+               print '\033[31m\033[7m IndexError %s raised for site: %s \033[0m' % (e,  response.url)
+               exit()
+            else:
+               #no exceptions raised
+               if (item['odd1'] or item['odd2'] or item['odd3']) and team1 and team2:
+                   items.append(item)  #only append if at least one odd found   
+               elif team1 and team2:
+                   #check out genuine events with no odds
+                   with open('PaddypowerSel_emptyodds.err','a') as emptyf:
+                       print >>emptyf, 'Event', item['eventName'],' was junked for emptyodds.'
+        return items
+#        for item in items:
+#            print item
+        """
+
+
+

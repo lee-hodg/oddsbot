@@ -1,0 +1,209 @@
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+import urllib #for url encoding
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#
+# Looks like the bet365 page is one big SWF flash file
+# <object></> with id "WebConsoleApp". Pain in the ass.
+# Nevertheless if Cookies are set correctly, we should
+# be able to immitate its calls to GET flash data asp,
+# then just parse the data | ; ; ;| needed. 
+# We don't want to parse the response.body at all,
+# we just need the right cookies to be set first.
+#
+#
+# It appears that both CactusVPN and linode are simply blocked 
+# by Bet365, however not on UKVPN. ON Cactus VPN, even browsing
+# via firefox is impossible. The basic page will load but access
+# to the data via the API call will trigger the response:
+#
+# Cache-Control	no-cache
+# Connection	close
+# Location	http://localhost
+# Pragma	no-cache
+#
+# Which redirects to localhost, and thus on the linode server, means
+# I actually hit my own website, hah.
+#
+# Not sure there is much I can do about this without another ip.
+#
+class Bet365Spider(Spider):
+    name = "Bet365"
+    allowed_domains = ["bet365.com"]
+    
+    #set initial cookies
+    # these include rmbs, pstk, aps03 (-> cg,cst,ct,lng)
+    # e.g. aps03=cg=0&cst=0&ct=70&lng=1; rmbs=3; pstk=5BB13D1E4D9149DB8E59BFEC8972F035000003'
+    start_urls=['http://www.bet365.com/en/?alt=1']
+   
+    def parse(self, response):
+        # With initial cookies this home page, should set
+        # a session cookie, and add some more values to aps03
+        #Set-Cookie: pstk=0A20088A52624A3497D154FA3A373BF9000003; domain=bet365.com; path=/
+	#Set-Cookie: rmbs=3; expires=Fri, 26-Sep-2014 23:00:00 GMT; path=/
+	#Set-Cookie: session=processform=0&id=%7B7E250BDC%2D9D00%2D4703%2DAD97%2D8BACB2E561C0%7D&psite=1&flslnk=%23HO%23; path=/
+	#Set-Cookie: aps03=oty=1&cg=0&cst=0&cf=N&ct=70&tzi=1&hd=N&lng=1; expires=Wed, 27-Mar-2024 00:00:00 GMT; path=/
+ 
+        #where is cif, and cp2?
+
+        # This finally redirects to GET http://www.bet365.com/home/FlashGen4/WebConsoleApp.asp?&cb=10881629460
+        # which will load the SWF, but we don't want that.
+        url = 'http://www.bet365.com/home'
+        headers = {'Referer': '	http://www.bet365.com/en/?alt=1'}
+        yield Request(url=url, headers=headers, callback=self.pre_parse_leagues)
+                     
+    def pre_parse_leagues(self,response):
+        #simulate the Flash api request to get league data now cookies should be good.
+        base_url = 'http://www.bet365.com/home/inplayapi/FlashData.asp'
+        GETstr =   '?lid=1&zid=9&pd=%23AS%23B1%23&wg=0&cid=70&cg=0' 
+        headers= { 'Referer': 'http://www.bet365.com/home/FlashGen4/WebConsoleBoot/WebConsoleBoot-418.swf'}
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+       
+
+    def parse_leagues(self,response):
+
+        # Data comes back pretty ugly:
+        #|PA;ID=C1250935022;IT=C1250935022;NA=England Conference North;CN=1;XB=1;PD=#AC#B1#C1#D13#E25093502#F2#R1#;|
+        # PA;ID=C1250935062;IT=C1250935062;NA=England Conference South;CN=1;XB=1;PD=#AC#B1#C1#D13#E25093506#F2#R1#;|
+        #first split on | then ;
+        league_objects = response.body.split('|')[10:]
+        #make into a nice dict, chop the PA off at beginning, drop final '' because of ; at end
+        league_objects = [obj.split(';')[1:-1] for obj in league_objects]
+        league_dicts_List = []
+        for league in league_objects:
+                 league_dicts_List.append(dict([element.split('=') for element in league]))
+        #looks like DO ones are countries and other non match odds stuff so remove
+        league_dicts_List = [ldict for ldict in league_dicts_List if ('DO' not in ldict.keys()) and ldict!={}]
+
+        #now for each league construct the Flash data req using params just gathered.
+        base_url = 'http://www.bet365.com/home/inplayapi/FlashData.asp'
+        headers = {'Referer': 'http://www.bet365.com/home/FlashGen4/WebConsoleBoot/WebConsoleBoot-418.swf'}
+
+        for ldict in league_dicts_List:
+            GETstr = '?lid=1&zid=9&pd='+urllib.quote_plus(ldict['PD'])+'&wg=0&cid=70&cg=0'
+            #print 'I want (\033[7m'+ GETstr+' ) \033[0m'
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.pre_parse_Data) #,dont_filter=True)
+
+    def pre_parse_Data(self, response):
+        # Before we get to the odds we need select market
+        # PA;IT=RC1249538252;NA=Full Time Result;LS=1;PD=#AC#B1#C1#D13#E24953825#F2#F^1#;
+        market_objects = response.body.split('|')
+        #make into a nice dict, chop the PA off at beginning, drop final '' because of ; at end
+        market_objects = [obj.split(';')[1:-1] for obj in market_objects]
+        market_dicts_List = []
+        for market in market_objects:
+                 market_dicts_List.append(dict([element.split('=') for element in market]))
+
+        #First remove any without NA key, then get only full time result market
+        fulltime_dict = [mdict for mdict in market_dicts_List if 'NA' in mdict.keys()]
+        fulltime_dict = [mdict for mdict in fulltime_dict if mdict['NA'] == 'Full Time Result']
+
+        if fulltime_dict:
+            PD = fulltime_dict[0]['PD']
+
+        # now make the request
+        base_url = 'http://www.bet365.com/home/inplayapi/FlashData.asp'
+        headers = {'Referer': 'http://www.bet365.com/home/FlashGen4/WebConsoleBoot/WebConsoleBoot-418.swf'}
+        GETstr = '?lid=1&zid=9&pd='+urllib.quote_plus(PD)+'&wg=0&cid=70&cg=0'
+        #print 'I want (\033[7m'+ GETstr+' ) \033[0m'
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data,dont_filter=True)
+
+ 
+    def parse_Data(self, response):
+
+        print "DEBUG: \033[7m Going to parse data for URL: ", response.url,"  \033[0m " 
+
+        
+
+
+        #The data response looks like (after splitting on |)
+        #'PA;ID=529542065;IT=C2529542065;OR=1;NA=Man Utd v Aston Villa;AU=5;LP=6;MC=Live In-Play. ;',
+        #'PA;ID=529542065;IT=C3529542065;OR=1;NA=4/9;OD=4/9;SU=0;FI=45646845;',
+
+        event_objects = response.body.split('|')
+        #make into a nice dict, chop the PA off at beginning, drop final '' because of ; at end
+        event_objects = [obj.split(';')[1:-1] for obj in event_objects]
+        # need to remove the ones with EX otherwise the '=' in url strings mess up splitting on '='
+        good_event_objects =[]
+        for obj in event_objects:
+            keep_obj = True
+            for el in obj:
+                if 'EX=puw~http' in el:
+                    keep_obj = False
+            if keep_obj:
+                good_event_objects.append(obj)
+                
+        event_dicts_List = []
+        for event in good_event_objects:
+            event_dicts_List.append(dict([element.split('=') for element in event]))
+
+        #with open('Bet365_oddsData.json','a') as dataf:
+        #   json.dump(event_dicts_List, dataf, indent=4)
+        #   print >> dataf, '*'*100
+
+        # events
+        eventsData = [event for event in event_dicts_List if ('IT' in event.keys()) and ('NA' in event.keys())]
+        eventsData = [event for event in eventsData if event['IT'].startswith('C2') and event['NA'] != '\xc2\xa0']
+
+        oddsData = [event for event in event_dicts_List if 'FI' in event.keys()]
+        #seems like having only these keys is unique to date objs, and their ID matching event ID
+        dateData = [event for event in event_dicts_List if set(event.keys())=={'ID','IT','NA','OR'}]
+        dateData = [event for event in dateData if event['IT'].startswith('E2')]
+
+        items = []
+        for event in eventsData:
+            item = EventItem()
+
+            #eventName
+            item['eventName'] = [event['NA']]
+
+
+            # date and time
+            for date in dateData:
+                #match on order param
+                if event['OR'] == date['OR']:
+                    dateandtime = date['NA']
+                    #20140329124500 fmt
+                    date = [datetime.datetime.strptime(dateandtime, '%Y%m%d%H%M%S').strftime('%m %d')]
+                    time = [datetime.datetime.strptime(dateandtime, '%Y%m%d%H%M%S').strftime('%H:%M')]
+                    item['eventDate'] = date
+                    item['eventTime'] = time
+
+            # odds
+            # E.G. take an event with ID: 5529542065, you will find the date is
+            # like "IT": "E2529542065" and "ID": "529542065" compactly formatted as "NA": "20140329124500"
+            # . The event itself has "IT": "C2529542065", (ID 529542065+0)
+            # the odd1 has "IT": "C3529542065" (ID 529542065)
+            # the odd3 (draw) has IT": "C4529542066" (ID 529542066, i.e. +1)
+            # the odd2 has "IT": "C5529542067" (ID 529542067, i.e. +2)
+            # they have same FI, and C3,C4,C5 but seems end does not always incr +1 
+            for odd in oddsData:
+                if event['ID'] == odd['ID']:
+                    FI = odd['FI']
+            for odd in oddsData:
+                if odd['FI'] == FI:
+                   if odd['IT'].startswith('C3'):
+                       #home
+                       item['odd1'] = [odd['OD']]
+                   elif odd['IT'].startswith('C4'):
+                       #draw
+                       item['odd3'] = [odd['OD']]
+                   elif odd['IT'].startswith('C5'):
+                       #away
+                       item['odd2'] = [odd['OD']]
+
+            items.append(item)
+   
+        return items
+        
+

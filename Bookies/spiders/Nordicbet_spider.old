@@ -1,0 +1,195 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+def day2date(day):
+
+    #
+    # Take a name like Today, Tomorrow,  or short date Sat, sat
+    # and convert it to %m %d of the soonest Sat
+    # from now.
+    #
+    day=day.lower()
+
+    #get next 7 days as %m %d and dayname
+    days={}
+    #first today and tomorrow
+    days[0] = {'name': 'today',
+                   'fmt_date': today.strftime('%m %d')
+              }
+    tmoz = today + datetime.timedelta(days=1)
+    days[1] = {'name': 'tomorrow',
+               'fmt_date': tmoz.strftime('%m %d')
+              }
+    #then the next 5
+    for n in range(2,7):
+        the_day = today + datetime.timedelta(days=n)
+        days[n] = {'name': the_day.strftime('%a').lower(),
+                   'fmt_date': the_day.strftime('%m %d')
+                   }
+
+    #perform format of day by matching
+    for d in days:
+        if days[d]['name'] in day:
+            return days[d]['fmt_date']
+    #print '\033[31m\033[7m day2date Could not format day:  %s \033[0m' % day
+    return -1            
+        
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = [
+                  u'Outrights',
+                  u'To progress',
+                  u'Fantasy Matches',
+                  u'Matches',
+                  u'Club specials',
+                  u'Veikkausliiga Season Bets'
+                  ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link)
+            return True
+
+    return False  #don't filter rest
+
+
+
+class NordicbetSpider(Spider):
+    name = "Nordicbet"
+    allowed_domains = ["nordicbet.com"]
+
+    # Visit the football homepage set session cookie 
+    def start_requests(self):
+        yield Request(
+        url='https://www.nordicbet.com/eng/sportsbook',
+        callback=self.pre_parse_leagues
+        )
+
+    def pre_parse_leagues(self, response):
+        #make request to get page with leagues
+        url =  'https://www.nordicbet.com/sportsbook_filter?use_mouseover=True&cmd=get_categories&category_id=50000000001'
+        headers = {'Referer': 'https://www.nordicbet.com/eng/sportsbook'}
+        yield Request(url=url, callback=self.parse_leagues)
+
+    def parse_leagues(self, response):
+        sel = Selector(response)
+
+        #get rel links
+        league_pairs=[]
+        league_links=names=sel.xpath('//div/a')
+        for link in league_links:
+             league_pairs.append((link.xpath('span/text()').extract(), link.xpath('@href').extract()))
+        #clean up
+        league_pairs = league_pairs[1:] #first is junk
+        league_pairs=[(x[0].strip(),y[0]) for (x,y) in league_pairs]        
+        #remove unwanted links; returns True to filter out link
+        league_links = [link for (league_name,link) in league_pairs if not leagueFilter(self.name, league_name)]
+
+        #construct the ajax request. It looks like '_' param in unix timestamp. 
+        # will it work without? 
+        base_url='https://www.nordicbet.com/eng/sportsbook?'
+        headers = {'Referer': 'https://www.nordicbet.com/eng/sportsbook',
+                   'X-Requested-With': 'XMLHttpRequest'}
+        for link in league_links:
+            #drop the #_
+            GETstr = 'cmd=chooseInAjax&category_id='+link[2:]+'&source=15&_='
+
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # use starts with to filter table ids
+        eventSelection = sel.xpath('//table[starts-with(@class, "resultstbl 1x2 game_")]')
+
+        items = []
+        
+        for event in eventSelection:
+               item = EventItem()
+   
+               # Get eventName.              
+               item['eventName'] = []
+               item['eventName'] = event.xpath('tr/td[@class="label"]/div[@class="label"]/a/text()').extract()
+               if not item['eventName']:
+                   #sometimes no hyperlink
+                   item['eventName'] = event.xpath('tr/td[@class="label"]/div[@class="label"]/text()').extract()
+
+               if item['eventName']:
+                    #replace ' - ' with ' V ' for vs
+                    item['eventName'][0] = item['eventName'][0].strip().replace(' - ',' V ') #space around - imp (some team names also cont -)
+
+               # Nordic bet has the worst date system yet. Time is good %H:%M, but date is like
+               # Today, Tomorrow, Sat., Sun. etc, but sometimes 12.06 too (e.g. worldcup)
+               time = event.xpath('tr/td[2]/div[@class="endingtime"]/div[@class="endingtime_text "]/span[@class="time"]/text()').extract()
+               item['eventTime'] = time
+
+               date=[]          
+               day = event.xpath('tr/td[2]/div[@class="endingtime"]/div[@class="endingtime_text "]/span[@class="day"]/text()').extract()
+               
+               if day:
+                   day = [d.strip().lower() for d in day]
+                   date = [day2date(day[0])]
+                   if date == [-1]:
+                        #fmt of date regular instead of day?
+                        try: 
+                            date = [datetime.datetime.strptime(day[0], '%d.%m').strftime('%m %d')]
+                        except ValueError as e:
+                            # sometimes date is of format %d.%m.%y so deal with that
+                            try:
+                                date = [datetime.datetime.strptime(day[0], '%d.%m.%y').strftime('%m %d')]
+                            except ValueError as e:
+                                print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                                print "[ERROR %s]: \033[7m\033[31m Tried day, d.m.y no luck \033[0m" % (self.name)
+                                print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+                                continue
+               else:
+                   #if day was empty could be live instead
+                   livelogo = event.xpath('tr/td[2]/div[@class="endingtime"]/div[@class="livebet_now_logo"]')
+                   if livelogo:
+                       date = [day2date('Today')]
+                   else:
+                       # no date, therefore useless, skip
+                       continue
+
+               item['eventDate'] = date
+
+               # Get prices.
+               #odd3 is draw
+               item['odd1'] = event.xpath('tr/td[4][@class="bet"]/a/div/div[@class="odds_box"]/div[@class="odds_middle"]/text()').extract()
+               item['odd3'] = event.xpath('tr/td[5][@class="bet"]/a/div/div[@class="odds_box"]/div[@class="odds_middle"]/text()').extract()
+               item['odd2'] = event.xpath('tr/td[6][@class="bet last"]/a/div/div[@class="odds_box"]/div[@class="odds_middle"]/text()').extract()
+               # a little clean
+               item['odd1'] = [o.strip() for o in item['odd1']]
+               item['odd3'] = [o.strip() for o in item['odd3']]
+               item['odd2'] = [o.strip() for o in item['odd2']]
+ 
+               items.append(item)  #only append if at least one odd found   
+
+        return items
+
+
+

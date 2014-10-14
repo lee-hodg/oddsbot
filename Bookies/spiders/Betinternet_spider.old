@@ -1,0 +1,103 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class BetinternetSpider(Spider):
+    name = "Betinternet"
+    allowed_domains = ["betinternet.com"]
+
+    # Visit the homepage first
+    def start_requests(self):
+        yield Request(
+        url='http://www.betinternet.com/en/Sports.bet',
+        callback=self.parse_countries,
+        dont_filter = True,
+        )
+
+    def parse_countries(self, response):
+
+        sel = Selector(response)
+
+        footballMenu = sel.xpath('//div[@class="SportsMenu"]/ul[@class="menu"]//li')[0]
+        countries = footballMenu.xpath('ul[@class="acitem"]/li')
+        #countryNames = countries.xpath('a/text()').extract()
+        #countryLinks = countries.xpath('a/@href').extract()
+        #countryPairs = zip(countryNames, countryLinks)
+
+        # Now the problem is that some countries have sublink leagues,
+        # whose links we will want to follow and some countries do not.
+        # For those without we want to scrape country href itself.
+        for country in countries:
+            countryName = country.xpath('a/text()').extract()[0]
+            if countryName == 'Outright Betting':
+                continue #skip
+
+            leagueNames = country.xpath('ul[@class="acitem"]/li/a/text()').extract()
+            leagueLinks = country.xpath('ul[@class="acitem"]/li/a/@href').extract()
+            leagues = zip(leagueNames,leagueLinks)
+            if not leagueLinks:
+                #country has no sublinks for leagues,
+                # use own href
+                print "[INFO %s]: \033[34m PREREQ: No sub-leagues for country: %s \033[0m" % (self.name,countryName)
+                link = country.xpath('a/@href').extract()
+                yield Request(link[0], callback=self.parse_Data)
+            else:
+                for league in leagues:
+                    print "[INFO %s]: PREREQ: \033[7m Country name %s \033[0m\033[32m sub-league name: %s \033[0m" % \
+                                                                                       (self.name, countryName, league[0])
+                    yield Request(league[1], callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # Get only event rows
+        eventSelection = sel.xpath('//table[@class="coupon"]//tr[@class="one" or @class="two"]')
+
+        items = []
+
+        for event in eventSelection:
+               item = EventItem()
+
+               # Get eventName.
+               item['eventName'] = event.xpath('td[@class="match"]/span[@class="couponMatch"]/text()').extract()
+
+               # Remember xpath puts everything into list, even if single item.
+               # '2014-05-13T16:00:00'
+               dateandtime = event.xpath('td[@class="match"]/span[@class="couponDate"]/span/text()').extract()
+               if dateandtime:
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.strptime(dateandtime[0],'%Y-%m-%dT%H:%M:%S').strftime('%m %d')]
+                        time = [datetime.datetime.strptime(dateandtime[0],'%Y-%m-%dT%H:%M:%S').strftime('%H:%M')]
+                    except ValueError as e:
+                        print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                        print "[ERROR %s]: \033[7m\033[31m dateandtime dump: %s" % (self.name, dateandtime)
+                        continue
+               else:
+                   # Without date, useless (and pipeline will drop anyway),
+                   # skip to next event.
+                   continue
+
+               item['eventDate'] = date
+               item['eventTime'] = time
+
+               # Get prices.
+               item['odd1'] = event.xpath('td[@class="odd"][1]/a/text()').extract()
+               item['odd3'] = event.xpath('td[@class="odd"][2]/a/text()').extract()
+               item['odd2'] = event.xpath('td[@class="odd"][3]/a/text()').extract()
+
+               items.append(item)  #validate in pipelines.py
+
+        return items
+
+

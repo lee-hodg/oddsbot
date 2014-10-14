@@ -1,0 +1,205 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+# from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+from time import time
+LOG_DIR = settings['LOG_DIR']
+import dateutil.parser
+
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+# Whitebet updated to a JSON serving API
+
+
+def day2date(day):
+
+    #
+    # Take a name like Today, Tomorrow,  or short date Sat, sat
+    # and convert it to %m %d of the soonest Sat
+    # from now.
+    #
+
+    day = day.lower()
+
+    # get next 7 days as %m %d and dayname
+    days = {}
+    # first today and tomorrow
+    # Choice between 'today' and actual name of today, e.g. fri
+    days[0] = {'name': ['today', today.strftime('%a').lower()],
+               'fmt_date': today.strftime('%m %d')}
+    tmoz = today + datetime.timedelta(days=1)
+    days[1] = {'name': ['tomorrow', tmoz.strftime('%a').lower()],
+               'fmt_date': tmoz.strftime('%m %d')
+               }
+    # then the next 5
+    for n in range(2, 7):
+        the_day = today + datetime.timedelta(days=n)
+        days[n] = {'name': the_day.strftime('%a').lower(),
+                   'fmt_date': the_day.strftime('%m %d')
+                   }
+
+    # perform format of day by matching
+    for d in days:
+        if day in days[d]['name']:
+            return days[d]['fmt_date']
+    # print '\033[31m\033[7m day2date Could not format day:  %s \033[0m' % day
+    return -1
+
+
+class WhitebetSpider(Spider):
+
+    name = "Whitebet"
+
+    # Visit the football homepage first
+    def start_requests(self):
+        yield Request(url='https://www.whitebet.com/en/betting',
+                      callback=self.preLeague)
+
+    def preLeague(self, response):
+
+        '''Make req to API for JSON '''
+
+        stamp = str(int(time() * 1000))  # ms since unix epoch
+        base_url = 'https://sparklesports.tain.com/'
+        GETstr = 'server/rest/event-tree/prelive/tree?lang=en&_='+stamp
+        headers = {'Accept': 'application/json, text/javascript, */*; q=0.01',
+                   'Referer': 'https://www.whitebet.com/en/betting'}
+
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parseLeague, dont_filter=True)
+
+    def parseLeague(self, response):
+        # parse league links
+
+        # sel = Selector(response)
+
+        # Get JSON resp
+        jsonBody = json.loads(response.body)
+        # Get football child
+        fchild = None
+        for child in jsonBody['children']:
+            if 'Football' == child['name']:
+                fchild = child
+        countries = []
+        leagues = []
+        if fchild:
+            # Get country children and ids
+            for cchild in fchild['children']:
+                countries.append((cchild['name'], cchild['id']))
+                for lchild in cchild['children']:
+                    # Get league children
+                    leagues.append((lchild['name'], lchild['id']))
+
+        base_url = 'https://sparklesports.tain.com'
+        GETstr = '/server/rest/event-tree/prelive/events'
+        GETstr += '/3/%(id)s'
+        GETstr += '?lang=en&currency=EUR&nodeId=%(id)s'
+        GETstr += '&nodeType=3&'
+        GETstr += 'eventMaxCount=75&_=%(stamp)s'
+        headers = {'Accept': 'application/json, text/javascript, */*; q=0.01',
+                   'Referer': 'https://www.whitebet.com/en/betting'}
+        for (name, id) in leagues:
+            stamp = str(int(time() * 1000))  # ms since unix epoch
+            newGETstr = GETstr % {'id': str(id), 'stamp': stamp}
+            yield Request(url=base_url+newGETstr, headers=headers,
+                          callback=self.parseData, dont_filter=True)
+
+        # Notice this xpath selector uses the '[starts-with(@class,"l1")]' and
+        # 'a/span[@class="name"]/text()="Football"]' selectors
+        # to only pick out li that have class starting "l1" and
+        # a 'a/span' with text "Football" as children.
+        # football_li = sel.xpath('//div[@class="inner"]/ul[@class="l1"]/'
+        #                        'li[starts-with(@class,"l1")][a/'
+        #                        'span[@class="name"]/text()="Football"]')
+        # league_names = football_li.xpath('ul[@class="l2"]/li/ul[@class="l3"]'
+        #                        '/li/a/span[@class="name"]/text()').extract()
+        # league_links = football_li.xpath('ul[@class="l2"]/li/'
+        #                                 'ul[@class="l3"]/li/a/@href').extract()
+        # pairs=zip(league_names,league_links)
+
+        # base_url = 'https://www.whitebet.com'
+        # headers = {'Referer': 'https://www.whitebet.com/en/betting'}
+
+        # for link in league_links:
+        #    yield Request(url=base_url+link, headers=headers,
+        #                  callback=self.parse_Data)
+
+    def parseData(self, response):
+
+        jsonBody = json.loads(response.body)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" \
+              % (self.name, response.url[20:])
+
+        eventSelection = jsonBody['events']
+
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+
+            # eventName
+            item['eventName'] = event['name']
+            # if titem['eventName']
+            #    team1, team2 = teams.split(' v ')  # space impt!
+            #    if team1 and team2:
+            #        item['eventName'] = [team1+' v '+team2]
+
+            # date and time
+            # day = event.xpath('td[@class="time"]/div[@class="wrap"]/span[1]'
+            #                  '/text()').extract()  # [u'SAT'] c.f. Nordicbet
+            # time = event.xpath('td[@class="time"]/div[@class="wrap"]/span[2]'
+            #                    '/text()').extract()  # [u'00:10'], good.
+
+            # if day:
+            #     day = [d.strip().lower() for d in day]
+            #     date = [day2date(day[0])]
+            #     if date == [-1]:
+            #         # fmt of date regular instead of day?
+            #         try:
+            #             date = [datetime.datetime.strptime(day[0],
+            #                     '%d.%m').strftime('%m %d')]
+            #         except ValueError as e:
+            #             # sometimes date is of format %d.%m.%y so deal with that
+            #             try:
+            #                 date = [datetime.datetime.strptime(day[0],
+            #                         '%d.%m.%y').strftime('%m %d')]
+            #             except ValueError as e:
+            #                 print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+            #                 print "[ERROR %s]: \033[7m\033[31m Tried day, d.m.y no luck \033[0m" % (self.name)
+            #                 print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+            #                 continue
+            # else:
+            #     # no date, therefore useless, skip
+            #     continue
+            dateandtime = event['startTime']  # '2014-06-24T18:00:00+0200'
+            if dateandtime:
+                date_parsed = dateutil.parser.parse(dateandtime)
+            item['eventDate'] = [date_parsed.strftime('%m %d')]
+            item['eventTime'] = [date_parsed.strftime('%H:%M')]
+
+            # 1x2 odds
+            item['odd1'] = []
+            item['odd3'] = []
+            item['odd2'] = []
+            for mkt in event['children']:
+                if mkt['name'] == '1X2':
+                    item['odd1'] = [mkt['children'][0]['odds']]
+                    item['odd3'] = [mkt['children'][1]['odds']]  # draw
+                    item['odd2'] = [mkt['children'][2]['odds']]
+
+            #  item['odd1'] = event.xpath('td[@class="multiple nr-1"]/'
+            #                             'div[@class="wrap"]/a/'
+            #                             'span[@class="odds"]/text()').extract()
+            #  item['odd3'] = event.xpath('td[@class="multiple nr-2"]/'
+            #                             'div[@class="wrap"]/a/'
+            #                             'span[@class="odds"]/text()').extract()
+            #  item['odd2'] = event.xpath('td[@class="multiple nr-3"]/'
+            #                             'div[@class="wrap"]/a/'
+            #                             'span[@class="odds"]/text()').extract()
+
+            items.append(item)  # validate in pipelines.py
+        return items

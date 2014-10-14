@@ -1,0 +1,116 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#
+# This is the new BuzzOdds spider.
+# They now seem to use elecgames external API,
+# and rec JSON response from it. NB necessary to visit
+# elecgames with a referer BuzzOdds to first set PHPSESSION cookie
+#
+
+class BuzzoddsSpider(Spider):
+    name = "Buzzodds"
+    allowed_domains = ["Buzzodds.com", "elecgames.net"]
+    
+    #incase cookie is needed
+    start_urls=['https://www.buzzpoker.com/buzz-odds']
+
+    #need to also get elecgames API to set their PHPsession cookie
+    def parse(self, response):
+        base_url = 'https://sports.elecgames.net'
+        GETstr = '/?partner=BuzzPoker&locale=en_GB'
+        headers = {'Referer': 'https://www.buzzpoker.com/buzz-odds'}
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.pre_parse_countries)   
+
+    #make request for countries data
+    def pre_parse_countries(self, response):
+
+        base_url = 'https://sports.elecgames.net/portal/tree/'
+        GETstr = '?id=5&isLive=2&startsWithin=0'
+        headers = {'Referer': 'https://sports.elecgames.net/?partner=BuzzPoker&locale=en_GB',
+                   'Accept' : 'application/json, text/javascript, */*; q=0.01',
+                   'X-Requested-With' : 'XMLHttpRequest'}
+  
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_countries)
+
+    def parse_countries(self,response):
+
+        #extract the needed params from the JSON response
+        jResp=json.loads(response.body)
+        countries = {}
+        unwanted = ['World Cup 2010']
+        for c in jResp['response']:
+            if c['name'] not in unwanted:
+                countries[c['name']]=c['id']
+   
+        base_url = 'https://sports.elecgames.net/portal/tree/'
+        headers = {'Referer': 'https://sports.elecgames.net/?partner=BuzzPoker&locale=en_GB',
+                   'Accept:' :'Accept: application/json, text/javascript, */*; q=0.01',
+                   'X-Requested-With' : 'XMLHttpRequest'}
+
+        for country in countries.keys():
+            GETstr = '?id=%s&isLive=2&startsWithin=0' % countries[country]
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self,response):
+
+        #extract the needed params from the JSON response
+        jResp=json.loads(response.body)
+        leagues = {}
+        for l in jResp['response']:
+            leagues[l['name']]=l['BpCompetitionId']
+
+        base_url = 'https://sports.elecgames.net/portal/events/'
+        headers = {'Referer': 'https://sports.elecgames.net/?partner=BuzzPoker&locale=en_GB',
+                   'Accept:' :'Accept: application/json, text/javascript, */*; q=0.01',
+                   'X-Requested-With' : 'XMLHttpRequest'}
+
+        for league in leagues.keys():
+            GETstr = '?id=%s&isLive=2&startsWithin=0' % leagues[league]
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+             
+        jResp=json.loads(response.body)
+        
+        jsonEventsData = jResp['response']
+
+        items = []
+        for jsonEvent in jsonEventsData:
+            item = EventItem()
+            item['eventName'] = [jsonEvent['name']]
+
+            dateandtime = jsonEvent['StartTimeUTC'] #2014-04-26T16:00:00
+
+         
+            #print 'DEBUG: EventName:', item['eventName'],' on date: ', dateandtime
+
+            date = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S').strftime('%m %d')]
+            time = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%M:%S').strftime('%H:%M')]
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            #odds
+            item['odd1'] = [jsonEvent['SelBackOddsHome']]
+            item['odd3'] = [jsonEvent['SelBackOddsDraw']] #draw
+            item['odd2'] = [jsonEvent['SelBackOddsAway']]
+            
+            items.append(item)
+   
+        return items
+        

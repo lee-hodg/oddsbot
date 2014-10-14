@@ -1,0 +1,175 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+# import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now()  # datetime obj will need str later with .strftime('%m %d')
+
+
+def am2dec(odd):
+    '''
+    Convert US odds to Decimal style.
+    '''
+    if odd in ['EV', 'ev', 'even', 'evens']:
+        return odd
+
+    try:
+        odd = float(odd)
+    except ValueError:
+        return -1
+    # retrun formatted 2d
+    if odd <= -100:
+        return "%0.2f" % (1-(100/odd))
+    else:
+        return "%0.2f" % (1+(odd/100))
+
+
+class OneviceSpider(Spider):
+    name = "Onevice"
+    allowed_domains = ["1vice.ag"]
+
+    # Visit the homepage first
+    def start_requests(self):
+        yield Request(url='http://www.1vice.ag',
+                      callback=self.get_sports
+                      )
+
+    def get_sports(self, response):
+        # request sports page
+        yield Request(url='http://www.1vice.ag/?page_id=17',
+                      callback=self.get_leagues
+                      )
+
+    def get_leagues(self, response):
+        # request leagues page
+        yield Request(url='http://backend.1vice.ag/livelines.aspx',
+                      headers={'Referer': 'http://www.1vice.ag/?page_id=17'},
+                      callback=self.parse_leagues
+                      )
+
+    def parse_leagues(self, response):
+
+        sel = Selector(response)
+
+        footballMenu = sel.xpath('//ul[@id="menuLiveLines"]/li[starts-with(text(),"SOCCER -")]')
+        leagues = []
+        for menu in footballMenu:
+            links = menu.xpath('ul/li/a/@href').extract()
+            lnames = menu.xpath('ul/li/a/text()').extract()  # useful for filter
+            lpairs = zip(lnames, links)
+            leagues.extend(lpairs)
+
+        headers = {'Referer': 'http://backend.1vice.ag/livelines.aspx?wmode=transparent'}
+        base_url = 'http://backend.1vice.ag/'
+        for league in leagues:
+            GETstr = league[-1]
+            yield Request(url=base_url+GETstr, headers=headers,
+                          callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name, response.url[20:])
+
+        # Get only event rows
+        rows = sel.xpath('//table[@id="content-container"]/tr/'
+                         'td[@id="content"]/center/table/'
+                         'tr[starts-with(@class, "TrGame")'
+                         ' or @class="GameBanner"]')
+
+        # GameBanner row signifies new event, but want to exclude 1st half lines
+        # rows. We then only want the first three rows under if they have M
+        # line!
+        events = []
+        for n, row in enumerate(rows):
+            rowClass = row.xpath('self::tr/@class').extract()[0]
+            if rowClass == 'GameBanner':
+                banner = row.xpath('td/text()').extract()[0]
+                if 'First Half' not in banner:
+                    # new event
+                    event = []
+                    # Instead of assuming block of three we could collect until
+                    # class change similar to commented out below, but given
+                    # that if event is not team1,team2, draw it will be not
+                    # match odds anyway, it seems pointless.
+                    ind_start = n+1  # first row under banner row
+                    ind_end = n+4  # last row of first block under banner
+                    events.append(rows[ind_start:ind_end])  # add 3 rows to events
+
+        # Now the problem is an event is represented by three consecutive rows
+        # of the same class (e.g. even). There is no grouping other than
+        # proximity and class.
+        # events = []
+        # while rows:
+        #     # pop rows until class of row changes from odd->even or even->odd,
+        #     # usually this will mean popping three rows.
+        #     event = []
+        #     initClass = currentClass = rows[0].xpath('self::tr/@class').extract()[0]
+        #     while currentClass == initClass:
+        #         event.append(rows.pop(0))
+        #         if rows:
+        #             currentClass = rows[0].xpath('self::tr/@class').extract()[0]
+        #         else:
+        #             break
+        #     # append event to list of events
+        #     events.append(event)
+
+        # Now we have the events in neat packages of 3 rows, parse data.
+        items = []
+        for event in events:
+                item = EventItem()
+
+                # Attempt to get M line odds first. If none we break.
+                # NB event is a list of 3 rows. Pipeline will drop if no odds
+                # here, i.e. not M line.
+                item['odd1'] = [am2dec(o) for o in event[0].xpath('td[5]/text()').extract()]
+                item['odd2'] = [am2dec(o) for o in event[1].xpath('td[5]/text()').extract()]
+                item['odd3'] = [am2dec(o) for o in event[2].xpath('td[5]/text()').extract()]  # draw
+
+                # Get eventName.
+                team1 = event[0].xpath('td[4]/text()').extract()[0]
+                team2 = event[1].xpath('td[4]/text()').extract()[0]
+                if team1 and team2:
+                    item['eventName'] = [team1+' V '+team2]
+
+                # date and time, Aug 09 and 6:59 AM
+                date = event[0].xpath('td[2]/text()').extract()
+                time = event[1].xpath('td[2]/text()').extract()
+                # strip whitespace if these exist, whilst maintaining list
+                date = [d.strip() for d in date]
+                time = [t.strip() for t in time]
+                # Some date formatting
+                if date:
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.strptime(date[0], '%b %d').strftime('%m %d')]
+                    except ValueError as e:
+                        print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                        print "[ERROR %s]: \033[7m\033[31m date dump: %s" % (self.name, date)
+                        continue
+                else:
+                    # Without date, useless (and pipeline will drop anyway),
+                    # skip to next event.
+                    continue
+                # Some time formatting
+                if time:
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        time = [datetime.datetime.strptime(time[0], '%I:%M %p').strftime('%H:%M')]
+                    except ValueError as e:
+                        print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                        print "[ERROR %s]: \033[7m\033[31m date dump: %s" % (self.name, time)
+                        continue
+
+                item['eventDate'] = date
+                item['eventTime'] = time
+
+                items.append(item)   # validate in pipelines.py
+
+        return items

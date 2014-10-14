@@ -1,0 +1,54 @@
+Scraping:
+
+Add more bookies and exchanges.
+
+Automate scraping (either via cron, python process calls,
+or importing scrapy in)
+
+Sort out date and time field logging, make this standard consistent,
+work out what to do if unknown etc, check arb dates.
+
+Get league
+
+Add more odds and sports (long way off)
+
+Decide if sqlite is the best db or if there are reasons warranted
+for another, might be fine.
+
+--------------------
+Webinterface:
+
+EASY BUT LATER:
+1)when launch, make https
+2) stronger passwords: http://stackoverflow.com/questions/5226329/enforcing-password-strength-requirements-with-django-contrib-auth-views-password
+3) calc drop down menu: whatif, adjustable forfeit calc (underlay/overlay). Possibly changing calc to borderless _blank pop up which can be dragged.
+Or more transparent.
+4) arb hyperlink clickable to popup _blank detail view (leage etc)
+6) clean up css: e.g. seperate error.css with .threeLinErrWrap, twoLineErrWrap, which individual html can all use as a base, before
+overwriting some position in the doc head. Also base.html where possible for some of my other sections like profile, to clean these up.
+
+PRE-LAUNCH
+8) Design logo.
+7) Sort out errors on calc (do this after css)
+9) It's probably wisest to allow users to sign up freely, but then have a group/permissions
+that premium members get put into for acess to freshest arbs rather than authenticated access.
+5) Change to timestamp filtering instead of arb ROI filter for non auth users, and allow multiple commissions (one for each exchange) in profile
+settings.
+
+---------------------
+
+Longer long term
+
+mobile site
+way for users to feedback on arbs 
+MB wiki (mainly because forum is useful, but a wordy thing good for seo, and seems like django would excel at this task)
+Forget MB, oddscomparison services are much more popular use of the data....
+Dutches.
+Alerts: could be done with a seperate model, that is a Foreign key or one-to-one to each user. Each user in which, saves
+essentially filters: book: willhill, exchange: betfair, arb between.....
+
+There is then an external python script on some kind of cron (depending on freq of arb updating, maybe 15mins) that looks
+in the filters db, to see if any of these filters match the current state of the arbs table. If so, it emails user. (the email
+can be obtained by the foreign key, or if more conveient just written along with username and rest of filters)
+
+

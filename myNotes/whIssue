@@ -1,0 +1,114 @@
+<fpghost84> Hi, I'm new to scrapy, and trying to use the crawlspider to follow all urls from http://sports.williamhill.com/bet/en-gb/betting/y/5/et/Football.html. This works well other than certain urls found, that seem to redirect (e.g. Indonisian super league). Scrapy eventually gives up, presumably because of the redirect. Can anyone tell me how I can deal with this?
+<fpghost84> scrapy retires a few times, but fails with the error "[<twisted.python.failure.Failure <class 'scrapy.xlib.tx._newclient.ParseError'>>]"
+* skade has quit (Ping timeout: 260 seconds)
+* skade (~skade@176.74.57.205) has joined #scrapy
+* djm- (~djm@onwHCcoreFw1.2i3.net) has joined #scrapy
+<nyov> ParseError(Exception): Some received data could not be parsed.
+<nyov> fpghost84: the http response must be seriously icky if you get this
+<fpghost84> nyov: thanks for the reply
+<fpghost84> I also tried simply with the scrapy shell:
+<fpghost84>  scrapy shell "http://sports.williamhill.com/bet/en-gb/betting/t/343/Swiss-Challenge.html"
+<fpghost84> it too gives a similar error as you can test
+<fpghost84> which leaves scrapy to die with:  DEBUG: Gave up retrying <GET http://sports.williamhill.com/bet/en-gb/betting/t/343/Swiss-Challenge.html> (failed 3 times): [<twisted.python.failure.Failure <class 'scrapy.xlib.tx._newclient.ParseError'>>]"
+<fpghost84> nyov: is scrapy processing the 301 redirect correctly then? 
+<fpghost84> nyov: just I don't see it mentioning the redirect anywhere
+<nyov> fpghost84: it works here.
+<fpghost84> hmm, just noticed this game just went live and no longer redirects at all
+<fpghost84> nyov: yep, no longer a problem for me either now
+<fpghost84> nyov: let me find another example
+<fpghost84> right now this one is giving the same error: scrapy shell "http://sports.williamhill.com/bet/en-gb/betting/t/2360/South-African%2dPremier-League.html"
+<fpghost84> right now this one is giving the same error: scrapy shell "http://sports.williamhill.com/bet/en-gb/betting/t/2360/South-African-Premier-League.html"
+<fpghost84> maybe they are all games on the verge of going live or something and redirect before the kick off. Strange how the browser can follow the redirect still though
+<nyov> 2014-02-10 10:23:00+0000 [default] DEBUG: Redirecting (301) to <GET http://sports.williamhill.com/bet/en-gb/betting/e/5577688/.html> from <GET http://sports.williamhill.com/bet/en-gb/betting/t/2360/South-African-Premier-League.html>
+<nyov> 2014-02-10 10:23:07+0000 [default] DEBUG: Crawled (200) <GET http://sports.williamhill.com/bet/en-gb/betting/e/5577688/.html> (referer: None) ['partial']
+<fpghost84> nyov: Oh, works for you then
+<fpghost84> nyov: how strange.  My version is: scrapy --version Scrapy 0.22.0 - no active project
+<nyov> I'm not sure what your issue could be there. Redirecting disabled?
+<fpghost84> nyov: how could I check that?
+<nyov> hm, "no active project" - should use default settings. I have the same here
+<fpghost84> nyov: yeah I'm outside any project, just for testing this issue, just in case it happened to be a problem with the code I wrote. But it doesn't even work for me in the scrapy shell oddly...
+<nyov> try forcing redirect: scrapy shell "http://sports.williamhill.com/bet/en-gb/betting/t/2360/South-African-Premier-League.html" -s REDIRECT_ENABLED=1
+<nyov> but I don't think that would be it
+<fpghost84> no same error again unfortunately
+* Jnco has quit (Quit: Jnco)
+<nyov> maybe you have some proxy that could be the issue?
+<fpghost84> nyov: here is the full log:http://paste.ubuntu.com/6908326/
+<fpghost84> nyov: I do use privoxy, but scrapy should not be going through it....def worth a check though
+<fpghost84> nyov: yeah I killed privoxy, and scrapy requests still hit the other williamhill links without problem, so it must not be going through it, otherwise they would fail completely
+<nyov> ok, another unlikely reason might be an older twisted version
+<nyov> I'm really guessing at the reason here. If you know how, maybe try wireshark to see what's coming through the pipe
+<nyov> though if it works in your browser, that can't be it...
+<fpghost84> OK, how to check  twisted version?
+<fpghost84> (it also works with curl in the terminal)
+<fpghost84> dpkg -l python-twisted shows:
+<fpghost84> ii  python-twisted                              13.0.0-1ubuntu1            all                        Event-based framework for internet applications (dependency package)
+<nyov> looks good. maybe you have an older pip installed version though?
+<fpghost84> does this 13.0.0-1ubuntu1 match yours?
+<nyov> no, but 13 is good
+<nyov> should be
+<fpghost84> hmmm, I'm not sure I have pip installed at all :/
+<fpghost84> could that be the problem
+<nyov> no
+<nyov> maybe someone else could take a guess here
+<fpghost84> nyov: thanks for your help nevertheless
+<nyov> ipython
+<nyov> In [1]: import twisted
+<nyov> In [2]: twisted.__version__
+<nyov> Out[2]: '13.1.0'
+<nyov> this is mine
+<fpghost84> twisted.__version__Out[2]: '13.0.0'
+<fpghost84> so looks like I am lagging behind a version
+<fpghost84> worth a short?
+<fpghost84> shot*
+<fpghost84> what would be the best way to upgrade this?
+<fpghost84> pip?
+<nyov> I guess so. I don't really think it'll help though
+<nyov> see if you find a solution in here: https://github.com/scrapy/scrapy/issues/345
+<nyov> maybe you could try running with the http10 downloader
+<fpghost84> how to run with http10 downloader?
+<nyov> DOWNLOAD_HANDLERS = {'http': 'scrapy.core.downloader.handlers.http10.HTTP10DownloadHandler'}
+<nyov> in your settings.py
+<fpghost84> ok thanks, will give it a go
+<fpghost84> just in the meantime, I resintalled scrapy with pip, and it came with twisted twisted.__version__ : '13.2.0'
+<fpghost84> this changed the error too: [<twisted.python.failure.Failure <class 'twisted.web._newclient.ParseError'>>]
+<fpghost84> I will try your http10 idea next
+<fpghost84> wireshark, seems to just show the 301 request over and over, without there ever being a normal request made
+<nyov> what does it look like though? can you pastebin the raw response as seen by wireshark?
+<fpghost84> the williamhill server is returning with the location with the correct redirect, but it seems scrapy/twisted is unable to parse that packet to get the location
+<fpghost84> yes can do
+<nyov> OH
+<nyov> well... now *I* tried this without proxy, and i'm getting the same error. hahaha
+<fpghost84> here you go http://paste.ubuntu.com/6908536/
+<fpghost84> nyov haha! oh dear
+<nyov> okay so the issue is definitely the server sending "HTTP/1.1 301" where my proxy makes it "HTTP/1.0 301 Moved Permanently"
+<nyov> as noted in https://github.com/scrapy/scrapy/issues/345#issuecomment-20842852
+<fpghost84> nyov: Oh, so it can deal with the "moved permanently"  but not regular 301? 
+<fpghost84> nyov: what is a "reasonless status" though? I wasn't sure if that applied to me or not, hah
+<nyov> using http10 downloader should work as a fix
+<nyov> run scrapy shell in your project folder, when you have the settings.py modified as I mentioned
+<fpghost84> nyov: ok, let me give that a go
+<nyov> running through privoxy might fix it too
+<fpghost84> nyov: yes that does seem to fix it
+<fpghost84> except the warning /usr/local/lib/python2.7/dist-packages/IPython/frontend.py:30: UserWarning: The top-level `frontend` package has been deprecated. All its subpackages have been moved to the top `IPython` level.
+<fpghost84>   warn("The top-level `frontend` package has been deprecated.
+<fpghost84> nyov: but it is redirecting at least
+<nyov> just an ipython warning
+<fpghost84> nyov: OK, well many thanks for helping me resolve this issue
+<fpghost84> nyov: funny how a proxy solves it
+<fpghost84> too
+Sorry to hog the channel today! but this is a simpler question (hopefully) how can I get my parser to test if I have been redirected?
+* dpn` (dpn`@2600:3c00::f03c:91ff:feae:acd1) has joined #scrapy
+<fpghost84> (I tried response.status but even after a redirect is shows 200, I guess because at that stage scrapy is feeding it the new url like any other)
+<fpghost84> Alternatively can I callback a different passer depending on redirect or not?
+<fpghost84> parser*
+<nyov> response.meta.get('redirect_times')
+<nyov> fpghost84: no, the 301s will usually be consumed by the RedirectMiddleware if it's enabled. the spider doesn't see them
+<fpghost84> nyov: that worked perfectly. Thanks very much again.
+<fpghost84> nyov: OK
+<nyov> the docs @ http://doc.scrapy.org/en/latest/topics/request-response.html#scrapy.http.Response.flags
+<nyov> say that redirected should be a flag, but it doesn't look like RedirectMiddleware actually sets such a flag
+<nyov> fpghost84: but you can get response.meta 'redirect_urls' for the URLs that happened before, if you need logic based on that
+* pvt_petey (~pvt_petey@82-69-79-20.dsl.in-addr.zen.co.uk) has joined #scrapy
+* pablohof (~prh@r186-52-172-193.dialup.adsl.anteldata.net.uy) has joined #scrapy
+<fpghost84> nyov: sorry, was just away.  Thanks, useful to know. Hopefully redirect_times should suffice for me
+* dangra (~dangra@186.8.129.216) has joined #scrapy

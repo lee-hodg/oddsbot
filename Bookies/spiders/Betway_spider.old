@@ -1,0 +1,134 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+def leagueFilter(name,link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = [
+                  'multiple',
+                  'specials',
+                   'forecast',
+                   'finalist',
+                   'totals',
+                   'elimination',
+                   'awards',
+                   'highest',
+                   'top',
+                   'world-cup-2014/groups',
+                   'winner',
+                   'fastest-goal',
+                  ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+           return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link[30:])
+            return True
+
+    return False  #don't filter rest
+
+
+
+class BetwaySpider(Spider):
+    name = "Betway"
+    allowed_domains = ["betway.com"]
+    start_urls=['https://sports.betway.com/#/soccer/international/friendlies']
+   
+    # First get the league links
+    def parse(self, response):
+        sel = Selector(response)
+        
+        # Use some funky xpath to get only li for soccer
+        li=sel.xpath('//div[@id="oddsmenu-inner"]/ul[@class="parent"]/li[descendant::div[@class="section "]/a[@id="betclass_soccer"]]')[0]
+        # league links:
+        league_links =li.xpath('ul[@class="child"]/li/ul[@class="subchild"]/li/div[@class="section "]/a/@href').extract()
+
+        # Remove unwanted links, returns True to filter out link.
+        # Actually easier to filter by link.
+        league_links = [link for link in league_links if not leagueFilter(self.name,link)]
+
+        base_url = 'https://sports.betway.com/?u='
+        headers={ 'Referer': 'https://sports.betway.com/',
+                  'X-Requested-With': 'XMLHttpRequest' }
+ 
+        for link in league_links:
+            yield Request(url=base_url+link, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+	
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+        sel = Selector(response)
+
+        # Betway has very annoying display for each league, 
+        # with all events of certain date under that date block head.
+        tableRows = sel.xpath('//tbody[@class="oddsbody"]/tr')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        blockdate = [] 
+        items = []
+        for row in tableRows:
+            #Test with xpath if date row by seeing if td has parent
+            #tr with class date. Surely  easier way to just check self?
+            if row.xpath('td[parent::tr[@class="date"]]'):
+                 blockdate = row.xpath('td/text()').extract()
+
+            else: 
+                # Else test if this is an 'event' row, using time as
+                # criteria.
+               rowtime = row.xpath('td[@class="market_title"]/div[1]/text()').extract() #24hr
+               if rowtime !=[]:
+                       # We have event.
+                       item = EventItem()
+
+                       date = blockdate
+                       time = rowtime
+
+                       # Format date and time as desired 
+                       # betway uses '08.03.2014 and '23:30'
+                       if  "Tomorrow" in date:
+                           tmoz = today + datetime.timedelta(days=1)
+                           date = [tmoz.strftime('%m %d')]
+                       elif  "Today" in date:
+                           date = [today.strftime('%m %d')]
+                       elif date != []:
+                           date = [datetime.datetime.strptime(date[0], '%Y-%m-%d').strftime('%m %d')]
+
+                       # Set date and time
+                       item['eventDate'] = date
+                       item['eventTime'] = time #time already 24hr for betway
+
+
+                       # EventName. Remember this will be the name within a list
+                       eventName = row.xpath('td[@class="market_title"]/a/text()').extract() #[u'Sarpsborg 08 - Viking']
+                       if eventName:
+                           item['eventName'] = [eventName[0].replace(' - ',' V ')]
+ 
+
+                       # Price date.
+                       item['odd1'] = row.xpath('td[contains(@class,"outcome")][1]/a[@class="outcome"]/div[@class="outcome_button"]/text()').extract()
+                       item['odd3'] = row.xpath('td[contains(@class,"outcome")][2]/a[@class="outcome"]/div[@class="outcome_button"]/text()').extract() #odd3 is draw
+                       item['odd2'] = row.xpath('td[contains(@class,"outcome")][3]/a[@class="outcome"]/div[@class="outcome_button"]/text()').extract()
+                       items.append(item)  # Validate in pipelines.py
+
+        return items
+
+

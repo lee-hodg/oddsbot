@@ -1,0 +1,134 @@
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime, re
+
+#%m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+#
+# Create epoch timestamp, expires 5 minutes to add to end of URL
+# The AJAX would normally add this in their betting.js > updateCenter() to loadUrl
+# to avoid caching of page (i.e. ensure client get a recent copy)
+# You can see this in XHR GET request in Firebug.
+#
+def expires():
+     future = datetime.datetime.now() + datetime.timedelta(seconds=5*60)
+     return int(future.strftime("%s"))
+
+class BuzzoddsSpider(Spider):
+    name = "Buzzodds"
+
+    # This needs to be disabled when making extra requests
+    #allowed_domains = ["buzzpoker.com"] 
+
+    #URL with soccer comp click req
+    soccerurl  = "https://www.buzzpoker.com/_betting/getLeftColumn/sportsbet/7&0&0?_="+str(expires())
+    start_urls = [soccerurl] 
+
+    # Another option here would have been use crawlspider with "process_value"
+    # on each competition link found, to extract onclick params, construct
+    # loadUrl then return the url. See link-extractors docs.	
+
+    #you must retain the name 'parse' with basic spider!   
+    def parse(self, response):  
+        #parse league links
+
+        sel = Selector(response)
+	
+	jMethods = sel.xpath('//table[2]//tr//td[not(@class) or @class!="plus"]/a/@onclick').extract()
+	
+	#Get the parameters we want from the onclick() methods scraped
+        # e.g onclick="displayEventsFromCategory(7, 55);"
+	paramList=[]
+	oBracket = re.compile('\(')  #find first (
+	cBracket = re.compile('\)')    #and first ) pos. re patterns
+	
+	for meth in jMethods:
+	      init = oBracket.search(meth).start()+1 #pos after first (
+	      fin  = cBracket.search(meth).start()  #pos bef first )
+              if meth.startswith('displayEventsFromCategory'):
+                        print 'DEBUG: onclick params obtained:', meth[init:fin]
+			paramList.append(tuple(meth[init:fin].split(',')))  #pack the tuples in list
+
+	# Using these params, recontruct the competition
+        # URLs where data is stored.
+	urlList =[]
+	for param in paramList:
+	     centerStateCookie = "displayEventsFromCategory"
+	     selectedSport = param[0].strip()
+  	     selectedCategory = param[1].strip()	
+	     selectedCompetition = "0"
+	     selectedEvent = "0"
+	     selectedLiveNowEvent = "0"	
+	     expandBetNbrInActiveSettledBets = "0"
+	     loadUrl = "/_betting/getCenterColumn/" + centerStateCookie + "/" + selectedSport + "&" + selectedCategory + "&" + selectedCompetition \
+		+ "&" + selectedEvent + "&" +  selectedLiveNowEvent + "&" + expandBetNbrInActiveSettledBets+"?_="+str(expires())
+	     loadUrl = "https://www.buzzpoker.com"+loadUrl
+	     urlList.append(loadUrl)
+	     print 'DEBUG: reconstructed URL to be scraped :', loadUrl		        
+
+	# Now for each of these constructed URLS 
+        # we can make a request to parse Data method.
+	for url in urlList:
+            yield Request(url, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+        sel = Selector(response)
+        print "DEBUG: \033[7m Going to parse data for URL: ", response.url[20:], " \033[0m"
+
+	eventSelection = sel.xpath('//table[@class="PluginBettingOddsTable PluginBettingOddsTableSports"]//tr')        
+
+	
+	items = []
+	for game in eventSelection:
+            item = EventItem()
+	    try:
+               #datetime format for Buzzodds: 14/03/2014 17:00
+	        when = game.xpath('td[1][@class="time"]/text()').extract()
+                if when:
+                    #if when not []
+                    try: 
+                        date = [datetime.datetime.strptime(when[0], '%d/%m/%Y %H:%M').strftime('%m %d')]
+                        time = [datetime.datetime.strptime(when[0], '%d/%m/%Y %H:%M').strftime('%H:%M')]
+                    except IndexError as e:
+                        print '\033[31m\033[7m IndexError:  %s , see errfile \033[0m' % e
+                        print '\033[31m\033[7m Empty datetime used.'
+                        with open('Buzzodds_emptydatetime.err','a') as emptyf:
+                            print >>emptyf, 'Event', item['eventName'],' was junked.'
+                        date = []
+                        time = []
+                    #print 'DEBUG: datetime are:', date, time
+                else:
+                    date = []
+                    time = []
+               
+
+                item['eventDate'] = date
+	      	item['eventTime'] = time
+
+                item['eventName'] = game.xpath('td[2]/a/text()').extract()
+                #print 'DEBUG: eventName:',item['eventName']
+
+               	item['odd1'] = game.xpath('td[3]/a/span/text()').extract() 
+                item['odd3'] = game.xpath('td[4]/a/span/text()').extract() #our conv is odd3 is draw
+      	        item['odd2'] = game.xpath('td[5]/a/span/text()').extract()
+
+
+	    except IndexError as e:
+                 print '\033[31m\033[7m IndexError: %s raised for redirected site: %s \033[0m' % (e, response.url)
+                 exit()
+
+            else:
+                 #no exceptions raised
+		 if (item['odd1'] or item['odd2'] or item['odd3']):
+                     print '[DEBUG:] eventName is:', item['eventName']
+                     print '[DEBUG:] odds:',item['odd1'],item['odd3'],item['odd2']
+		     items.append(item)  #only append if at least one odd found   
+		 elif item['eventName']:
+                     #check out genuine events with no odds
+                     with open('Buzzodds_emptyodds.err','a') as emptyf:
+		         print >>emptyf, 'Event', item['eventName'],' was junked for emptyodds.'
+	return items

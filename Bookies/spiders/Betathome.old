@@ -1,0 +1,128 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import re
+import json
+# from time import time
+LOG_DIR = settings['LOG_DIR']
+
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['Winner',
+                   'Top',
+                   'Finishing',
+                   'Special',
+                   'Relegated',
+                   'Overall',
+                   ]
+
+    exceptionPhrases = ['']
+
+    for phrase in exceptionPhrases:
+        # don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name, link)
+            return True
+
+    return False  # don't filter rest
+
+
+class BetathomeSpider(Spider):
+
+    name = "Betathome"
+
+    # Visit the football homepage first
+    def start_requests(self):
+        yield Request(url='https://www.bet-at-home.com/en/sport',
+                      callback=self.parseLeague)
+
+    def parseLeague(self, response):
+        sel = Selector(response)
+        links = sel.xpath('//li[@id="sport_1"]/ul/li/ul/li/a/@href').extract()
+
+        # Filter links
+        links = [link for link in links if not leagueFilter(self.name, link)]
+
+        # Get groupids from links
+        gDicts = []
+        p = re.compile("/en/sport/football/[a-zA-Z0-9-]+/[a-zA-Z0-9-]+/"
+                       "(?P<eventGroupId>\d+)")
+        for link in links:
+            r = p.search(link)
+            d = r.groupdict()
+            gDicts.append(d)  # append dict like {'gid': u'10777'}
+
+        # Build request for leagues
+        # NB We are POSTing JSON here, use curl -d '{"eventGroupId":"4470"}'
+        # Only asp cookie is essential
+        base_url = 'https://www.bet-at-home.com/svc/sport/ToggleEventGroup'
+        headers = {'Content-Type': 'application/json; charset=utf-8',
+                   'Referer': 'https://www.bet-at-home.com/en/sport',
+                   'X-Requested-With': 'XMLHttpRequest'}
+        for gDict in gDicts:
+            yield Request(url=base_url, headers=headers, method='POST',
+                          body=json.dumps(gDict), callback=self.parseData)
+
+    def parseData(self, response):
+
+        print ("[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m"
+               % (self.name, response.url[20:]))
+
+        # Resp is JSON, albeit just one key!
+        jsonResp = json.loads(response.body)
+        sel = Selector(text=jsonResp['d'])  # Since str obj not Response
+
+        eventSelection = sel.xpath('//table/tbody/tr')
+
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+
+            # event name
+            item['eventName'] = event.xpath('td[1]/text()').extract()
+            if item['eventName']:
+                teams = item['eventName'][0].split(' - ')
+                teams = [team.strip() for team in teams]
+                item['eventName'] = [' V '.join(teams)]
+
+            # datetime
+            dateandtime = event.xpath('td[2]/text()').extract()
+            # Format is 05.07.14 16:00
+            try:
+                date = [datetime.datetime.strptime(dateandtime[0], '%d.%m.%y %H:%M').strftime('%m %d')]
+                time = [datetime.datetime.strptime(dateandtime[0], '%d.%m.%y %H:%M').strftime('%H:%M')]
+            except ValueError as e:
+                print ("[ERROR %s]: \033[7m\033[31m ValueError: %s for URL:"
+                       "%s \033[0m" % (self.name, e, response.url[20:]))
+                print ("[ERROR %s]: \033[7m\033[31m Date dump: %s."
+                       " SKIP. \033[0m" % (self.name, dateandtime))
+                if item['eventName']:
+                    print ("[ERROR %s]: \033[7m\033[31m eventName: %s."
+                           " \033[0m" % (self.name, item['eventName']))
+                continue  # Skip
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            # Odds
+            item['odd1'] = event.xpath('td[3]/a/text()').extract()
+            item['odd3'] = event.xpath('td[4]/a/text()').extract()
+            item['odd2'] = event.xpath('td[5]/a/text()').extract()
+
+            items.append(item)
+        return items

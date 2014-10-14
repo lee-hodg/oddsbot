@@ -1,0 +1,136 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import dateutil.parser #since they use ordinal date 1st, 2nd..
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['Live',
+                   'What If',
+                   'World Cup',
+                   '2016',
+                   'Capital One',
+                  ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link)
+            return True
+
+    return False  #don't filter rest
+
+class SkybetSpider(Spider):
+    name = "Skybet"
+    allowed_domains = ["skybet.com"]
+
+    # Visit the football homepage first for cookies.
+    def start_requests(self):
+        yield Request(
+        url='http://www.skybet.com/football',
+        callback=self.parse_leagues
+        )
+   
+
+    def parse_leagues(self, response):  
+
+        sel = Selector(response)
+
+        #get competitions section
+        sections = sel.xpath('//div[@class="section"]')
+        for sec in sections:
+            if sec.xpath('h3[@class="hecto"]/text()').extract() == [u'Competitions']:
+                compSec = sec
+
+        leagues = compSec.xpath('ul[@class="limit-list"]//li/a/@href').extract()
+
+        #filter.
+        leagues = [league for league in leagues if not leagueFilter(self.name, league)]
+
+        #request leagues.
+        base_url = 'http://www.skybet.com'
+        headers = {'Referer': 'http://www.skybet.com/football'}
+        for league in leagues:
+            print league
+            yield Request(url=base_url+league, headers=headers, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # with all events of certain date under that date block head.
+        blocks = sel.xpath('//div[@class="market-wdw"]')
+
+        # For all rows under with no date will use latest blockdate,
+        # single item list to match xpath extract
+        headerdate = []
+        items = []
+        for block in blocks:
+            headerdate = block.xpath('h3[@class="section-head"]/text()').extract() # Tuesday 13th May 2014
+            date_parsed = dateutil.parser.parse(headerdate[0]) #format header date.
+            headerdate = [date_parsed.strftime('%m %d')]
+
+            if headerdate !=[]:
+                # Now process events in this block all sharing this date.
+                events = block.xpath('table[@class="mkt mkt11 six-col"]/tbody//tr')
+                for event in events:
+                    item = EventItem()
+
+                    # Deal with date and time
+                    date = headerdate
+                    # Because of tv live icon this extracts list of two els
+                    # first is empty after stripping, second is time as 17:00
+                    time = event.xpath('td[@class="tc1"]/text()').extract()
+                    time= [x.strip() for x in time if x.strip() != '']
+                    # Set date and time
+                    item['eventDate'] = date
+                    item['eventTime'] = time 
+
+
+                    outcomes = event.xpath('td[starts-with(@class,"outcome")]')
+                    homeName = []
+                    awayName =[]
+                    item['eventName'] =[]
+                    item['odd1'] = []
+                    item['odd3'] = []
+                    item['odd2'] = []
+
+                    # Get homeName and odd1 from first outcome
+                    outcome = outcomes[0]
+                    homeName = outcome.xpath('a/span[@class="oc-desc"]/text()').extract()
+                    item['odd1'] = outcome.xpath('a/b[@class="odds"]/text()').extract()
+
+                    # Get draw odds, odd3 from second outcome
+                    outcome = outcomes[1] 
+                    item['odd3'] = outcome.xpath('a/b[@class="odds"]/text()').extract()
+
+                    # Get awayName and odd2 from third outcome
+                    outcome = outcomes[2] 
+                    awayName = outcome.xpath('a/span[@class="oc-desc"]/text()').extract()
+                    item['odd2'] = outcome.xpath('a/b[@class="odds"]/text()').extract()
+
+
+                    if homeName and awayName:
+                        item['eventName'] = [homeName[0]+' V '+awayName[0]]
+
+                    items.append(item)  # Validate in pipelines.py
+
+        return items

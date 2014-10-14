@@ -1,0 +1,103 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime, re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#%m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+class DoxxbetSpider(Spider):
+    name = "Doxxbet"
+
+    #URL with soccer comp click req
+    start_urls = ['https://www.doxxbet.com/en/sports-betting/']
+
+    # Another option here would have been use crawlspider with "process_value"
+    # on each competition link found, to extract onclick params, construct
+    # loadUrl then return the url. See link-extractors docs.	
+
+    #you must retain the name 'parse' with basic spider!   
+    def parse(self, response):  
+        #parse league links
+
+        sel = Selector(response)
+
+        # Notice this xpath selector uses the 'li[a/text()="Soccer"]'
+        # to only pick out li that have an 'a' with text "Soccer".
+        # No matter what the order of the li, we get the right one.
+        league_names = sel.xpath('//ul[@class="l1 nav"]/li[a/text()="Soccer"]/ul[@class="l2 nav"]/li/ul[@class="l3 nav"]/li/a[@class="item"]/text()').extract()
+        jMethods = sel.xpath('//ul[@class="l1 nav"]/li[a/text()="Soccer"]/ul[@class="l2 nav"]/li/ul[@class="l3 nav"]/li/a[@class="item"]/@href').extract()
+
+        cupIdsList=[]	
+        for method in jMethods:
+            matches=re.findall(r"loadLC\((\d+?)\)",method)
+            if matches:
+                cupIdsList.append(matches[0])
+
+        #league_pairs=zip(league_names,cupIdsList)
+
+        # for each cup Id build the ajax request
+        # hopefully the cookie will be set when visted sports betting page.
+        base_url = 'https://www.doxxbet.com/ajax/bets.aspx'
+        headers = { 'Referer' : 'https://www.doxxbet.com/en/sports-betting/',
+                    'X-Requested-With' : 'XMLHttpRequest'}
+
+        for cid in cupIdsList:
+            GETstr = '?ResetChanceTypeGroupSelection=1&LeagueCupID='+str(cid)+'&AnchorID=oddFilter'
+            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+	eventSelection =  sel.xpath('//table//tr')        
+
+	
+	items = []
+	for event in eventSelection:
+                item = EventItem()
+
+                team1= event.xpath('td[2]/a/span[@class="name"]/text()').extract()
+                team2= event.xpath('td[4]/a/span[@class="name"]/text()').extract()
+                if team1 and team2:
+                    item['eventName'] = [team1[0]+' v '+team2[0]]
+
+
+                #datetime format for Doxxbet 25.3\xa0-\xa020:45
+                # Remember xpath puts everything into list, even if single item.
+                # Thus, to strip:
+                dateandtime = [x.strip().replace(u'\xa0','') for x in event.xpath('td[@class="date"]/text()').extract()]
+
+
+                if dateandtime:
+                    #if when not []
+                    try: 
+                        
+                        date = [datetime.datetime.strptime(dateandtime[0], '%d.%m-%H:%M').strftime('%m %d')]
+                        time = [datetime.datetime.strptime(dateandtime[0], '%d.%m-%H:%M').strftime('%H:%M')]
+                    except (ValueError,IndexError) as e:
+                        if team1 and team2:
+                            date = []
+                            time = []
+                            print '[ERROR %s]:\033[7m\033[31m Error: %s raised for site: %s \033[0m' % (self.name, e, response.url)
+                    #print 'DEBUG: datetime are:', date, time
+                else:
+                    date = []
+                    time = []
+               
+
+                item['eventDate'] = date
+	        item['eventTime'] = time
+
+                item['odd1'] = event.xpath('td[@class="odd1"]/a/span[@class="odd"]/text()').extract()
+                item['odd3'] = event.xpath('td[@class="oddX"]/a/span[@class="odd"]/text()').extract() #draw
+                item['odd2'] = event.xpath('td[@class="odd2"]/a/span[@class="odd"]/text()').extract()
+
+                items.append(item)  #validate in pipelines.py
+	return items

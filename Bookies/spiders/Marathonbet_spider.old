@@ -1,0 +1,80 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class MarathonbetSpider(Spider):
+    name = "Marathonbet"
+    allowed_domains = ["marathonbet.com"]
+
+    #marathonbet has url with everything listed (excellent)
+    start_urls=['http://www.marathonbet.com/en/betting/Football/']
+   
+
+    def parse(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        sel = Selector(response)
+        eventSelection = sel.xpath('//table[@class="foot-market"]//tbody/tr[@class="event-header"]')
+
+        items = []
+        for event in eventSelection:
+
+               item = EventItem()
+            
+               #marathonbet format is 19 Mar 19:45   
+               #use starts-with as sometimes it is "first" others "first "
+               dateandtime = event.xpath('td[starts-with(@class,"first")]/table/tr//td[@class="date"]/text()').extract()
+                
+               date = [dateandtime[0].rstrip()[:-5].strip()] #empty date if doesnt exist
+               time = [dateandtime[0].rstrip()[-5:].strip()]
+
+               if not date:
+                    #assume today (as often bookies miss date if event today)
+                    date = [today.strftime('%m %d')]
+               elif  "Tomorrow" in date:
+                    tmoz = today + datetime.timedelta(days=1)
+                    date = [tmoz.strftime('%m %d')]
+               elif  "Today" in date:
+                    date = [today.strftime('%m %d')]
+               elif date != [] and date != ['']:
+                    #standarise formatting frp, %d %b (19 Mar) to %m %d (09 03)
+                    #convert to datetime obj first then back to desired str
+                    try:
+                        date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+                    except ValueError as e:
+                        try:
+                            #try format 01 Jan 2015
+                            date = [datetime.datetime.strptime(date[0], '%d %b %Y').strftime('%m %d')]
+                        except ValueError as e:
+                             print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                             print "[ERROR %s]: \033[7m\033[31m Tried d b, d.b.Y no luck \033[0m" % (self.name)
+                             print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+                             continue
+                    
+               item['eventDate'] = date
+               item['eventTime'] = time
+               
+               team1 = event.xpath('td[starts-with(@class,"first")]/table/tr//td[@class="name"]/span/div[1]/text()').extract()
+               team2 = event.xpath('td[starts-with(@class,"first")]/table/tr//td[@class="name"]/span/div[2]/text()').extract()
+               item['eventName'] = []
+               if team1 and team2:
+                   item['eventName'] = [team1[0]+' V '+team2[0]]
+               
+
+               item['odd1'] = event.xpath('td[2]/span/text()').extract()
+               item['odd3'] = event.xpath('td[3]/span/text()').extract() #draw
+               item['odd2'] = event.xpath('td[4]/span/text()').extract()
+               items.append(item)  #validate in pipelines 
+
+        return items

@@ -1,0 +1,159 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request, FormRequest
+import datetime,re
+from Betvictor_script import process_script   #script to strip params and emulate js POST to get verification cookie.
+import os
+LOG_DIR = settings['LOG_DIR']
+#import urllib #for url encoding
+#from collections import OrderedDict
+
+#
+# Betvictor uses a js challenge when accessing page
+# for first time, if passed it sets the cookie and grants
+# access. See myNotes/Betvictor_writeup.txt for more.
+# But in brief, we rip the params from the initial
+# challenge response, simulate the js, uses the script
+# imported, then make a POST request, taking care
+# to use a tuple so that order in the param string
+# is kept!.
+#
+# There is also a loophole that adding '/' to end
+# of URL seems to bypass the need for any of this
+# ; even if simple GET requests are just used, if
+# the trailing slash is used the server serves content.
+# However, I keep the js challenge in place in case they
+# plug this hole in future.
+#
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class BetVictorSpider(Spider):
+    name = "Betvictor"
+    allowed_domains = ["betvictor.com"]
+
+    # Visit the football homepage first to GET the
+    # challenge response.
+    def start_requests(self):
+        yield Request(
+        url='http://www.betvictor.com/sports/en/football',
+        callback=self.challenge
+        )
+
+    def challenge(self,response):
+
+        # Rip params from js, simulate computation,
+        # return the TS644333_75 POST param needed.
+        value = process_script(response)
+        print "[INFO %s]: \033[7m Challenge value TS01644333_cr: %s \033[0m" % (self.name, value)
+
+        # Order is important when POSTing to sim the
+        # hidden form, hence use tuple of pairs, rather
+        # than dict. MAKE SURE in paros that this order
+        # matches firefox order via proxy.
+        orderedData= (
+                       ('TS01644333_id', '3'),
+                       ('TS01644333_cr', str(value)),  #('TS644333_75', str(value)),
+                       ('TS01644333_76', '0'),
+                       ('TS01644333_md', '1'),
+                       ('TS01644333_rf', '0'),
+                       ('TS01644333_ct', '0'),
+                       ('TS01644333_pd', '0'),
+                     )
+        yield FormRequest(
+        url='http://www.betvictor.com/sports/en/football',
+        formdata=orderedData,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):
+
+        #with open('Betvictor_leagues.html','w') as vlf:
+        #    print >> vlf, response.body
+
+        sel = Selector(response)
+
+        # 4428 seem to be match odds
+        #/sports/en/football/sco-championship/coupons/100/6265610/0/4428/0/PE/0/0/0/0/1
+        sx = SgmlLinkExtractor(allow=[r'http://www.betvictor.com/sports/en/football/[A-Za-z0-9-]+/coupons/100/[0-9]+/0/4428/0/PE/0/0/0/0/1'
+                                     ])
+        league_links = sx.extract_links(response)
+
+
+        #with open('Betvictor_links.txt','w') as lfile:
+        #    print >>lfile, '*'*100
+        #    for link in league_links: print >>lfile, link.url
+        #    print >>lfile, '*'*100
+
+        # For premier league a GET req here is fine, but again
+        # the '/' is needed otherwise, chlg presented again.
+        for link in league_links:
+            #print link.url
+            #should require a challenge, but just cheat
+            #and append the '/'!
+            if 'eng-premier-league' in link.url:
+                l=link.url+'/'
+                yield Request(l, callback=self.parse_Data)
+            else:
+                yield Request(link.url, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        # NB. To look at individual comp with scrapy shell
+        # it suffices to load link as usual:
+        # scrapy shell "http://www.betvictor.com/sports/en/football/eng-fa-trophy/coupons/100/5186710/0/4428/0/PE/0/0/0/0/1"
+        # premier league needs the '/' terminating.
+
+	#Debugging
+        #print '******************************************'
+	#print  'response url is:', response.url #, ' and status is:', response.status, ' redirected number:', response.meta.get('redirect_times')
+        #print '******************************************'
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        eventSelection = sel.xpath('//table/tbody//tr')
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+               # Remember xpath puts everything into list, even if single item.
+               # need to lob off three zeros to make valid date
+               dateandtime = [x.strip()[:-3] for x in event.xpath('td[@class="date"]/span/@data-time').extract()]
+
+               if dateandtime:
+                    # Standarise formatting frp, unix stamp to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%m %d')]
+                        time = [datetime.datetime.fromtimestamp(int(dateandtime[0])).strftime('%H:%M')]
+                    except ValueError as e:
+                        print '[ERROR %s]: \033[7m\033[31m ValueError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+                        print '[ERROR %s]: \033[7m\033[31m Date and/or time bad? : %s, %s' % (self.name, date, time)
+               else:
+                   date=[]
+                   time=[]
+
+               item['eventDate'] = date
+               item['eventTime'] = time
+
+               # Get eventName.
+               item['eventName'] = event.xpath('td[@class="event_description"]/a/text()').extract()
+
+               # Get prices.
+               #item['odd1'] = event.xpath('td[3][@class="outcome_td"]/@data-sort').extract()
+               #item['odd3'] = event.xpath('td[4][@class="outcome_td"]/@data-sort').extract() #our conv is odd3 is draw
+               #item['odd2'] = event.xpath('td[5][@class="outcome_td"]/@data-sort').extract()
+               item['odd1'] = event.xpath('td[3][@class="outcome_td"]/span/a/span/text()').extract()
+               item['odd3'] = event.xpath('td[4][@class="outcome_td"]/span/a/span/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[5][@class="outcome_td"]/span/a/span/text()').extract()
+
+               items.append(item)  #validate in pipelines.
+        return items
+

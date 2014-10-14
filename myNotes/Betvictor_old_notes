@@ -1,0 +1,136 @@
+http://www.betvictor.com/sports/en/football
+
+real:
+TS644333_id=3&TS644333_75=303fc76b6742cddaab7d9c4b111deacc%3Alkkk%3A9m6zn75N%3A562285816&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0
+scrapy
+TS644333_rf=0&TS644333_id=3&TS644333_75=75b6e9273245d1c1afd298d896fc0182%3Ahihh%3Ab9pwciZ3%3A2043877290&TS644333_pd=0&TS644333_ct=0&TS644333_md=1
+
+
+=================no cookies===========
+
+Looks like on the POST req no cookies, cookies only set after successful post of challenge.
+
+ff
+
+POST /sports/en/football HTTP/1.1
+Request Method: POST 
+Request URI: /sports/en/football
+Host: www.betvictor.com\r\n
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:28.0) Gecko/20100101 Firefox/28.0\r\n
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n
+Accept-Language: en-gb\r\n
+Accept-Encoding: gzip, deflate\r\n
+DNT: 1\r\n
+Referer: http://www.betvictor.com/sports/en/football\r\n
+Connection: keep-alive\r\n
+Content-Type: application/x-www-form-urlencoded\r\n
+Content-Length: 145\r\n
+
+Line-based text data: application/x-www-form-urlencoded
+TS644333_id=3&TS644333_75=544e52d33e0e9d0c952b31bd15c24256%3Aqqps%3An64wg0ou%3A1476999023&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0
+
+
+scrapy:
+
+POST /sports/en/football HTTP/1.0\r\n
+Request Method: POST
+Request URI: /sports/en/football
+Accept-Language: en\r\n
+Content-Length: 144\r\n
+Accept-Encoding: gzip,deflate\r\n
+Connection: close\r\n
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n
+User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/20100101 Firefox/25.0\r\n
+Referer: http://www.betvictor.com/sports/en/football\r\n
+Content-Type: application/x-www-form-urlencoded\r\n
+
+
+Even changing keep alive and host do nothing.
+
+Line-based text data: application/x-www-form-urlencoded
+TS644333_rf=0&TS644333_id=3&TS644333_75=bb648d1ba6b259a11a53d18f856c3383%3Arqos%3AW1vWmkJz%3A686485650&TS644333_pd=0&TS644333_ct=0&TS644333_md=1
+
+
+
+This cURL seems to work with values I generate! for the TS
+
+ curl 'http://www.betvictor.com/sports/en/football'  --data 'TS644333_id=3&TS644333_75=9eec1f5c8fb94a89a3c888a1e8e7b5c4:orop:0s8mYAIF:1368970104&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0' --compressed
+
+curl  --http1.0 'http://www.betvictor.com/sports/en/football'  --data 'TS644333_id=3&TS644333_75=30f1d0ed1c834c7fcde529a41c2e5fb9:kknm:vito6cxt:1437622474&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0' --compressed
+
+
+works too, suggesting not a http 1.0 vs 1.1 issue.
+
+
+
+7	3.425704000	192.168.1.38	212.22.225.203	HTTP	406	POST /sports/en/football HTTP/1.0  (application/x-www-form-urlencoded)
+
+
+firefox:
+No.     Time           Source                Destination           Protocol Length Info
+   1179 16.922151000   192.168.1.38          212.22.225.203        HTTP     648    POST /sports/en/football HTTP/1.1  (application/x-www-form-urlencoded)
+
+Frame 1179: 648 bytes on wire (5184 bits), 648 bytes captured (5184 bits) on interface 0
+Ethernet II, Src: IntelCor_15:44:c9 (fc:f8:ae:15:44:c9), Dst: Sfr_d6:c3:b0 (e0:a1:d7:d6:c3:b0)
+Internet Protocol Version 4, Src: 192.168.1.38 (192.168.1.38), Dst: 212.22.225.203 (212.22.225.203)
+Transmission Control Protocol, Src Port: 54476 (54476), Dst Port: http (80), Seq: 313, Ack: 4594, Len: 582
+Hypertext Transfer Protocol
+    POST /sports/en/football HTTP/1.1\r\n
+        [Expert Info (Chat/Sequence): POST /sports/en/football HTTP/1.1\r\n]
+            [Message: POST /sports/en/football HTTP/1.1\r\n]
+            [Severity level: Chat]
+            [Group: Sequence]
+        Request Method: POST
+        Request URI: /sports/en/football
+        Request Version: HTTP/1.1
+    Host: www.betvictor.com\r\n
+    User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:28.0) Gecko/20100101 Firefox/28.0\r\n
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n
+    Accept-Language: en-gb\r\n
+    Accept-Encoding: gzip, deflate\r\n
+    DNT: 1\r\n
+    Referer: http://www.betvictor.com/sports/en/football\r\n
+    Connection: keep-alive\r\n
+    Content-Type: application/x-www-form-urlencoded\r\n
+    Content-Length: 145\r\n
+    \r\n
+    [Full request URI: http://www.betvictor.com/sports/en/football]
+    [HTTP request 2/2]
+    [Prev request in frame: 1165]
+    [Response in frame: 1224]
+Line-based text data: application/x-www-form-urlencoded
+TS644333_id=3&TS644333_75=7a8b924dcf5f791d1dae6e246b5433bd%3Akijj%3A6K812H5v%3A1137271628&TS644333_md=1&TS644333_rf=0&TS644333_ct=0&TS644333_pd=0
+
+########################################################
+
+
+Found at that if you append '/' to URL requested everything suddenly works.
+In fact even simple GET requests seem to yield the desired content!
+
+All well and good, but I worry this is a loop hole on their part that they
+might one day close, in which case I genuinely will need to rip the js params,
+emulate the js script, then make the POST to the server to have it set the cookie
+and serve me the desired content. It remains a mystery to me why 
+cURL worked, and packets in wireshark (inc session cookies, and param data)
+looked indentical, yet when executed via the pythin requests lib, or via scrapy,
+I seemed to have no server response.
+
+Some notes in case you need this in the future.
+
+1) You can download the initial GET requests body (inc the js, params and form)
+then remove the js submit part of the script, and instead have a document.write(..)
+or change the input from hidden to text, to see their values if you prefer. This
+way you can check the python script against the js.
+
+2) Using Firebug, you can look at Network>HTML and right click the POST req,
+and select get cURL (you may need to add --compressed).
+
+3) There are no cookies needed with initial POST, they get set later.
+
+4) To print packet from wireshark, click print to file, select just
+selected packet, and expand as desired beforehand.
+
+5) Premier league seems to issue a seperate js challenge even if cookies
+have already been set (unless use the trailing / again)
+
+

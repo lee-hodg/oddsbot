@@ -1,0 +1,126 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,json,re
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class Bet3000Spider(Spider):
+    name = "Bet3000"
+    allowed_domains = ["bet3000.com"]
+
+    #visit home, set session cookie, get league JSON
+    def start_requests(self):
+        yield Request(
+        url='https://www.bet3000.com/en/html/home.html',
+        callback=self.parse_leagues
+        )
+
+    #first get the league links
+    def parse_leagues(self, response):
+        sel = Selector(response)
+        #get script with league JSON
+        all_scripts = sel.xpath('//script')
+        wanted_script = [script for script in all_scripts if 'Model.CategoryTree.getInstance().load' in script.extract()]
+
+        print "[INFO %s]: \033[7m Number of wanted scripts: %s \033[0m" % (self.name,len(wanted_script))
+
+        try:
+            wanted_script = wanted_script[0]
+        except IndexError:
+            print '\033[31m\033[7m [ERROR %s]: IndexError getting wanted scripted:, it has %s elements \033[0m' % (self.name,len(wanted_script))
+            exit()
+
+        #manipulate into valid JSON format (attributes quoted etc), then load the string to JSON
+        #Get rid of the 'ems: {' as this bracket only closes a few lines down, then drop the final comma too
+        #Everything inside 'Model.CategoryTree.getInstance().load(.....); should be valid JSON, so get with regex
+        # (we add the .*}.*document, to avoid matching up to very last );
+        _re = re.compile(r'Model\.CategoryTree\.getInstance\(\)\.load\((.*)\);.*}.*document', re.DOTALL)
+        x = wanted_script.re(_re)[0]
+        jsonCompData = json.loads(x)
+
+        #get football league ids
+        league_ids=[]
+        for child in jsonCompData[0]['children']:
+             #print child['data']['label'],' ,id:', child['data']['id']
+             league_ids.append(child['data']['id'])
+
+        #now for each league_id we need to make the request for event data
+        base_url = 'https://www.bet3000.com/en/eventservice/v1/events?'
+        headers = {'Referer': 'https://www.bet3000.com/en/html/home.html',
+                   'X-Requested-With': 'XMLHttpRequest'}
+
+        #f=open('Bet3000_leagues.log', 'w')
+        unwanted = ['7067','4328']
+        for id in league_ids:
+            if str(id) not in unwanted:
+                GETstr = 'category_id='+str(id)+'&offset=&live=&sportsbook_id=0'
+                url = base_url+GETstr
+                #print url
+                yield Request(url=url, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+	print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        #response body is JSON
+        jsonResp=json.loads(response.body)
+
+
+        try:
+            #event keys
+            jsonEvents = jsonResp['events']
+            #market keys (this is an intermediary between event date and actual prices)
+            jsonMarkets=jsonResp['markets']
+            #prediction keys
+            jsonPredictions=jsonResp['predictions']
+        except KeyError as e:
+            print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Error response or 404? \033[0m" % (self.name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,jsonResp)
+            return EventItem(odd1=[],odd2=[],odd3=[],eventName=[],eventDate=[],eventTime=[])
+
+        items = []
+        for event in jsonEvents:
+               item = EventItem()
+
+               # remember strings are immutable there replace does not modify in place
+               eventName = jsonEvents[event]['label']
+               #Replacing ' - ' by ' V ': spaces are important or 'Goverla-Uzhgorod' hyphen also would be rep.
+               eventName = eventName.replace(' - ',' V ')
+               item['eventName'] = [eventName]  #put in list like normal scrapy sel.xpath would
+
+               # date in format Wednesday, 26.03, but using timestamp expires_ts is easier
+               stamp = jsonEvents[event]['expires_ts']
+               item['eventDate'] = [datetime.datetime.fromtimestamp(int(str(stamp))).strftime('%m %d')]
+               item['eventTime'] = [datetime.datetime.fromtimestamp(int(str(stamp))).strftime('%H:%M')]
+
+               #get prediction ids for 3-way market
+               predictionIds =[]
+               for market in jsonMarkets:
+                   if jsonMarkets[market]['type'] == '3WAY' and jsonMarkets[market]['event_id'] == event:
+                       predictionIds = jsonMarkets[market]['predictions']
+
+               # get odds for these predictions
+               item['odd1']=[]
+               item['odd3']=[]
+               item['odd2']=[]
+               for prediction in jsonPredictions:
+                   if prediction in predictionIds:
+                       if jsonPredictions[prediction]['type']=='HOME':
+                           item['odd1'] = jsonPredictions[prediction]['odds']
+                       elif jsonPredictions[prediction]['type']=='DRAW':
+                           item['odd3'] = jsonPredictions[prediction]['odds']
+                       elif jsonPredictions[prediction]['type']=='VISITOR':
+                           item['odd2'] = jsonPredictions[prediction]['odds']
+
+               #no exceptions raised
+               items.append(item)  #validate in pipelines.py
+        return items

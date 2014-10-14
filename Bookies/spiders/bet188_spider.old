@@ -1,0 +1,226 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request,FormRequest
+import datetime
+import json
+import re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now()
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['coupon',
+                   'Specials',
+                   'Outright',
+                   'top-matches',
+                   'action=go_fb',
+                   'acca-bonus',
+                   'uk-both-teams-to-score',
+                   'today-and-tomorrow',
+                   'win-draw-win-both-teams-to-score',
+                   'my-matches',
+                   'football-outrights',
+                   'football-specials',
+                  ]
+
+    exceptionPhrases = ['bosnian-premier-league-coupon']
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link)
+            return True
+
+    return False  #don't filter rest
+
+class Bet188Spider(Spider):
+    name = "Bet188"
+    allowed_domains = ["188bet.co.uk"]
+
+    # Sets ASP.NET_SessionId, sscd2 cookies
+    # The response is basically the nav bar at top, footer,
+    # css and some js vars.
+    start_urls=['http://www.188bet.co.uk/en-gb/sports']
+
+    def parse(self, response):
+        sel = Selector(response)
+
+        # The next request. This sets an extra two empty
+        # cookies, mc, HighlightedSport, and adds
+        # ssc.SB with same val as sscd2.
+
+        # Looks like content is loaded from iframe:
+        # This has the empty <div id="tab-Menu" class=""> div, and some js
+        # that looks like it will fill it.
+        # Other than this there are some <!--templates--> 'textareas' which look like they may
+        # parse some variables from json, and build the HTML to go in the rel areas.
+        # e.g.  <!--Sport Menu-->
+
+        # Lets load this to at the very least get some more cookies.
+        # NB Referer same as req URL.
+        base_url='http://sb.188bet.co.uk/en-gb/sports?theme=black&q=&country=GB&currency=GBP&tzoff=-240'
+        headers ={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'Referer': 'http://sb.188bet.co.uk/en-gb/sports?theme=black&q=&country=GB&currency=GBP&tzoff=-240'}
+
+        yield Request(url=base_url, headers=headers,
+                      callback=self.pre_leagues, dont_filter =True)
+
+
+
+    def pre_leagues(self, response):
+
+        #This should be the 'money request' for league data and comp ids:
+        base_url = 'http://sb.188bet.co.uk/en-gb/Service/CentralService?GetData'
+        headers ={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'Referer': 'http://sb.188bet.co.uk/en-gb/sports/1/select-competition/default',}
+
+        # Versions seem to change each time I get the cURL?
+        # cURL shows form really needs nothing except reqUrl
+        # ,referer header and ASP.NET and ssc.SB cookies
+        # NB make sure you send url decoded here:
+        formdata = {'reqUrl' : '/en-gb/sports/1/select-competition/default'}
+        #Need to make a post req.
+        yield FormRequest(url=base_url, formdata=formdata, headers=headers,
+                                      callback=self.parse_leagues, dont_filter=True) #Will be making mult req to
+                                                                                     #same url, don't want scrapy filt dups.
+
+
+    def parse_leagues(self,response):
+
+        #extract the needed params from the JSON response
+        try:
+            jResp=json.loads(response.body)
+        except:
+            print "[ERROR %s]: \033[7m\033[31m Error: lostconn perhaps? \033[0m" % (self.name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,response.body)
+            yield []
+
+        #load the string from the mod key into json
+        jsonCountries=json.loads(jResp['mod'])
+
+        #reap the comp ids (cids) (keep name too for filter)
+        cids=[]
+        for country in jsonCountries:
+            for comp in country['c']:
+                cids.append((comp['n'],comp['id'])) #append tuple
+
+        # Filter the comps
+        cids = [(cname, cid) for (cname, cid) in cids if not
+                leagueFilter(self.name, cname)]
+
+        #Now need to construct the request for matchods data
+        base_url= 'http://sb.188bet.co.uk/en-gb/Service/CentralService?GetData'
+        headers={ 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',}
+
+
+        for (name,cid) in cids:
+            #seems the referer also gets set to requested cid.
+            #Would be nice if there was a way to test if 1x2 avail before making req,
+            #otherwise in parse_Data there will be no keys needed.
+            formdata= {'reqUrl': '/en-gb/sports/1/competition/1x2?competitionids='+str(cid)+'&'}
+            headers['Referer'] = 'http://sb.188bet.co.uk/en-gb/sports/1/competition/1x2?competitionids='+str(cid)
+            freq= FormRequest(url=base_url,formdata=formdata, headers=headers, callback=self.parse_Data, dont_filter=True)
+            freq.meta['league_name'] = name # pass additional data to callback for debugging.
+            yield freq
+
+    def parse_Data(self, response):
+
+        # get the league data we passed as arg through meta
+        league_name = response.meta['league_name']
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+        print "[INFO %s]: \033[7m This is league_name: %s \033[0m" % (self.name,league_name)
+
+        # Parse JSON from body
+        try:
+            jResp=json.loads(response.body)
+        except ValueError as e:
+            print "[ERROR %s]: \033[7m\033[31m ValueError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Response body not JSON for league: %s\033[0m" % (self.name, league_name)
+            print "[ERROR %s]: \033[7m\033[31m response.body dump: %s \033[0m" % (self.name,response.body)
+
+        #traverse JSON
+        try:
+            if 'mod' in jResp.keys():
+                jsonMOD = json.loads(jResp['mod'])
+            else:
+                print "[ERROR %s]: \033[7m\033[31m 'mod' key not found for league: %s\033[0m" % (self.name, league_name)
+                print "[ERROR %s]: \033[7m\033[31m  jResp key dump: %s \033[0m" % (self.name,jResp.keys())
+                return []
+            #data
+            if 'd' in jsonMOD.keys():
+                jsonData = jsonMOD['d']
+            else:
+                print "[ERROR %s]: \033[7m\033[31m 'd' key not found for league: %s\033[0m" % (self.name, league_name)
+                print "[ERROR %s]: \033[7m\033[31m  jsonMOD key dump: %s \033[0m" % (self.name,jsonMOD.keys())
+                return []
+            #competitions, it seems if no 1x2 there won't be a c key.
+            if 'c' in jsonData.keys():
+                jsonComps = jsonData['c']
+                print "[INFO %s]: \033[7m  jsonMOD['bt'] when c exists check: %s \033[0m" % (self.name,jsonMOD['bt'])
+            else:
+                print "[ERROR %s]: \033[7m\033[31m 'c' key not found for league: %s\033[0m" % (self.name, league_name)
+                print "[ERROR %s]: \033[7m\033[31m  jsonData key dump: %s \033[0m" % (self.name,jsonData.keys())
+                #It looks like jsonMOD['bt'] lists the mkt types avail for sel btn at top,so check with that:
+                print "[ERROR %s]: \033[7m\033[31m  No 1x2 mkt? jsonMOD['bt'] check: %s \033[0m" % (self.name,jsonMOD['bt'])
+                return []
+
+            #events
+            jsonEvents = jsonComps[0]['e'] #only load one comp at once so
+                                                    #safe to just get zeroth el.
+        except KeyError as e:
+            print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Error response or 404? No 1x2 mkts? For league: %s\033[0m" % (self.name, league_name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,jResp.keys())
+            return EventItem(odd1=[],odd2=[],odd3=[], eventName=[], eventDate=[],eventTime=[])
+
+        items = []
+        for jsonEvent in jsonEvents:
+            item = EventItem()
+
+
+            item['eventName'] =[]
+            homeName = jsonEvent['i'][0]
+            awayName = jsonEvent['i'][1]
+            if homeName and awayName:
+                item['eventName'] = [homeName + ' V ' + awayName]
+
+            #date and time
+            date = jsonEvent['i'][4] #u'09 / 06'
+            time = jsonEvent['i'][5] #24hr
+            date = datetime.datetime.strptime(date, '%d / %m').strftime('%m %d')
+            item['eventDate'] = [date]
+            item['eventTime'] = [time]
+
+            #odds
+            item['odd1'] = []
+            item['odd3'] = []
+            item['odd2'] = []
+            try:
+                item['odd1'] = [jsonEvent['o']['1x2'][1]]
+                item['odd3'] = [jsonEvent['o']['1x2'][5]]
+                item['odd2'] = [jsonEvent['o']['1x2'][3]]
+            except KeyError:
+                print ("[ERROR %s]: \033[7m\033[31m No 1x2 odds key?"
+                      "League: %s \033[0m") % (self.name, league_name)
+                print ("[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m"
+                       % (self.name,jsonEvent.keys()))
+
+            items.append(item)
+
+        return items
+

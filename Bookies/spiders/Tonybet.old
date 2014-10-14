@@ -1,0 +1,138 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+# from time import time
+LOG_DIR = settings['LOG_DIR']
+
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['Winner',
+                   'Top',
+                   ]
+
+    exceptionPhrases = ['']
+
+    for phrase in exceptionPhrases:
+        # don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name, link)
+            return True
+
+    return False  # don't filter rest
+
+
+class TonybetSpider(Spider):
+
+    name = "Tonybet"
+
+    # Visit the football homepage first
+    def start_requests(self):
+        yield Request(url='https://tonybet.com/football',
+                      callback=self.parseLeague)
+
+    def parseLeague(self, response):
+        # Probably most efficient to scrape all tournIds
+        # then build one big request for all leagues
+        # after filtering bad leagues.
+        sel = Selector(response)
+
+        lnames = sel.xpath('//li[@id="sport_2"]/div[@class="subCategories"]'
+                           '/ul/li/label/text()').extract()
+        lids = sel.xpath('//li[@id="sport_2"]/div[@class="subCategories"]'
+                         '/ul/li/input/@id').extract()
+        # checkboxTournament_5406 is format of lids, chop:
+        lids = [id[19:] for id in lids]
+        # Make pairs for easy filtering
+        lpairs = zip(lnames, lids)
+
+        lids = [lid for (lname, lid) in lpairs
+                if not leagueFilter(self.name, lname)]
+
+        # Build request for leagues
+        base_url = 'https://tonybet.com/cached_sports/football?'
+        GETstr = 'country=gb&eo_format=eu&'
+        for lid in lids:
+            GETstr += 'tournaments_ids[]=%s&' % lid
+        GETstr += 't=t'
+        headers = {'Referer': 'https://tonybet.com/football',
+                   'X-Requested-With': 'XMLHttpRequest'}
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parseData)
+
+    def parseData(self, response):
+
+        print ("[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m"
+               % (self.name, response.url[20:]))
+
+        sel = Selector(response)
+
+        # First row is just league heading,and you want to exclude
+        # 'sep' class rows.
+        eventSelection = sel.xpath('//table[@class="events singleRow"]/tr'
+                                   '[position()>1][not(@class="sep")]')
+        items = []
+        for event in eventSelection:
+            item = EventItem()
+
+            # event name
+            item['eventName'] = event.xpath('td[2]/text()').extract()
+            if item['eventName']:
+                teams = item['eventName'][0].split(' - ')
+                teams = [team.strip() for team in teams]
+                item['eventName'] = [' V '.join(teams)]
+
+            # datetime
+            try:
+                dateandtime = event.xpath('td[1][@class="dark"]/text()').extract()[-1].strip()
+            except IndexError as e:
+                print ("[ERROR %s]: \033[7m\033[31m IndexError: %s for URL:"
+                       "%s \033[0m" % (self.name, e, response.url[20:]))
+                print ("[ERROR %s]: \033[7m\033[31m Date dump: %s."
+                       "SKIP. \033[0m" % (self.name,
+                                          event.xpath('td[1][@class="dark"]/text()').extract()))
+                continue
+            # Format is either  Jun 27 18:30  or 18min
+            try:
+                date = [datetime.datetime.strptime(dateandtime, '%b %d %H:%M').strftime('%m %d')]
+                time = [datetime.datetime.strptime(dateandtime, '%b %d %H:%M').strftime('%H:%M')]
+            except ValueError as e:
+                if 'min' in dateandtime:
+                    date = [today.strftime('%m %d')]
+                    time = []
+                else:
+                    print ("[ERROR %s]: \033[7m\033[31m ValueError: %s for URL:"
+                           "%s \033[0m" % (self.name, e, response.url[20:]))
+                    print ("[ERROR %s]: \033[7m\033[31m Tried b.d H.M format"
+                           "and mins, no luck \033[0m" % self.name)
+                    print ("[ERROR %s]: \033[7m\033[31m Date dump: %s."
+                           " SKIP. \033[0m" % (self.name, dateandtime))
+                    if item['eventName'] :
+                        print ("[ERROR %s]: \033[7m\033[31m eventName: %s."
+                               " \033[0m" % (self.name, item['eventName']))
+                        continue
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            # Odds
+            item['odd1'] = event.xpath('td[3]/text()').extract()
+            item['odd3'] = event.xpath('td[4]/text()').extract()
+            item['odd2'] = event.xpath('td[5]/text()').extract()
+
+            items.append(item)
+        return items

@@ -1,0 +1,98 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,json
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+class GentingbetSpider(Spider):
+    name = "Gentingbet"
+    allowed_domains = ["gentingcasino.com"]
+
+    #visit to set session cookie
+    def start_requests(self):
+        yield Request(
+        url='https://www.gentingcasino.com/sports',
+        callback=self.request_links
+        )
+
+
+    #simulate GET requests to server for soccer league list
+    def request_links(self, response):
+        yield Request(
+        url= 'https://sports.gentingcasino.com/sportsbook/SOCCER/',
+        callback=self.parse_leagues
+        )
+
+    #first get the league links
+    def parse_leagues(self, response):
+        sel = Selector(response)
+        league_links = sel.xpath('//ul[@class="nav-left nav nav-list"]/ul[@id="subcat-level1"]//li/a/@href').extract()
+        league_links = [link for link in league_links if 'EU_CL' not in link]
+        print '[INFO %s]: Number league links: \033[7m %s \033[0m' % (self.name,len(league_links))
+        for link in league_links:
+             link = 'https://sports.gentingcasino.com'+link
+             yield Request(link, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+	
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        #just like paddypower data comes back in a JSON type format in a javascript function
+        #so we need to grab this from the script itself.
+        sel = Selector(response)
+        all_scripts = sel.xpath('//script')
+        wanted_script = [script for script in all_scripts if 'Sportsbook.AppView(' in script.extract()]
+        print "[INFO %s]: Number of wanted scripts: \033[7m %s \033[0m" % (self.name, len(wanted_script))
+        try:
+            wanted_script = wanted_script[0]
+        except IndexError:
+            print '[ERROR %s]:\033[7m\033[31m IndexError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+            print '[ERROR %s]:\033[31m\033[7m Getting wanted scripted:, it has %s elements \033[0m' % (self.name, len(wanted_script))
+            return EventItem() #return nothing
+        #print wanted_script.extract()
+        
+        #manipulate into valid JSON format (attributes quoted etc), then load the string to JSON
+        #Get rid of the 'ems: {' as this bracket only closes a few lines down, then drop the final comma too
+        jsonEventsData = json.loads(wanted_script.extract().splitlines()[16].lstrip()[4:-1])
+        
+        eventSelection = jsonEventsData['events']
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+
+               item['eventName'] = [event['n']]
+               #convert unixtimestamp, seems to be padded with 3 extra zeroes
+               item['eventDate'] = [datetime.datetime.fromtimestamp(int(str(event['s'])[:-3])).strftime('%m %d')]
+               item['eventTime'] = [datetime.datetime.fromtimestamp(int(str(event['s'])[:-3])).strftime('%H:%M')]
+
+               #work done the JSON tree
+               #get mkt id for the event
+               mid = event['id']
+               jsonMarketData = jsonEventsData['markets'][str(mid)]
+               #get price id
+               pid = jsonMarketData[0]['id']
+               jsonPriceData  = jsonEventsData['selections'][str(pid)]
+             
+               item['odd1']=[]
+               item['odd3']=[]
+               item['odd2']=[]
+               for price in jsonPriceData:
+                   if price['ref']== 'HOME':      
+                       item['odd1'] = str(price['ps'][0]['v'])
+                   elif price['ref'] == 'DRAW':
+                       item['odd3'] = str(price['ps'][0]['v'])
+                   elif price['ref'] == 'AWAY':
+                       item['odd2'] = str(price['ps'][0]['v'])
+
+               items.append(item)  #validate in pipelines.py
+        return items

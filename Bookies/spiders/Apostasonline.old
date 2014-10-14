@@ -1,0 +1,199 @@
+# -*- coding: utf-8 -*-
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+from datetime import datetime as pdt
+# from time import time
+import locale  # Porteugeuse dates
+LOG_DIR = settings['LOG_DIR']
+
+
+# %m %d, we will standardise bookie formating like that.
+today = pdt.now()
+
+
+def convMonth(date):
+    '''
+    Very bizarrely this bookie
+    sometimes uses English months
+    and Porteeuguse days, and sometimes
+    not, sometimes all porteuguse.
+    Dirty soln: convert any english month
+    to port and then parse based on portegeuse.
+    '''
+    monthDict = {'January': 'Janeiro',
+                 'February': 'Fevereiro',
+                 'March': 'Março',
+                 'April': 'Abril',
+                 'May': 'Maio',
+                 'June': 'Junho',
+                 'July': 'Julho',
+                 'August': 'Agosto',
+                 'September': 'Setembro',
+                 'October': 'Outubro',
+                 'November': 'Novembro',
+                 'December': 'Dezembro',
+                 }
+    for key in monthDict.keys():
+        if key in date:
+            return date.replace(key, monthDict[key])
+    return date
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['Winner',
+                   'Top',
+                   ]
+
+    exceptionPhrases = ['']
+
+    for phrase in exceptionPhrases:
+        # don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name, link)
+            return True
+
+    return False  # don't filter rest
+
+
+class ApostasonlineSpider(Spider):
+
+    name = "Apostasonline"
+
+    # Visit the homepage first
+    def start_requests(self):
+        yield Request(url='https://www.apostasonline.com/',
+                      callback=self.parseLeague)
+
+    def parseLeague(self, response):
+        sel = Selector(response)
+
+        lids = sel.xpath('//li[@class="sport_240"]/ul/li/ul/li/'
+                         'a/@data-id').extract()
+        lnames = sel.xpath('//li[@class="sport_240"]/ul/li/ul/li/'
+                           'a/text()').extract()
+
+        lpairs = zip(lids, lnames)
+        lids = [lid for (lid, lname) in lpairs
+                if not leagueFilter(self.name, lname)]
+        # Build req
+        base_url = 'https://www.apostasonline.com/pt-PT/sportsbook/eventpaths/multi/'
+        headers = {'Referer': 'https://www.apostasonline.com/',
+                   'X-Requested-With': 'XMLHttpRequest'}
+        # Build request for leagues
+        for lid in lids:
+            GETstr = '[%s]?ajax=true&timezone=undefined' % lid
+            yield Request(url=base_url+GETstr, headers=headers,
+                          callback=self.parseData, dont_filter=True)
+
+        # Testing:
+        # GETstr = '[%s]?ajax=true&timezone=undefined' % '23170'
+        # yield Request(url=base_url+GETstr, headers=headers,
+        #               callback=self.parseData, dont_filter=True)
+
+    def parseData(self, response):
+
+        print ("[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m"
+               % (self.name, response.url[20:]))
+
+        sel = Selector(response)
+
+        # Get only win_draw_win, not outrights
+        blocks = sel.xpath('//div[contains(@class, "win_draw_win")]'
+                           '/div[@class="market_type-content"]'
+                           '/div[@class="rollup event_date"]')
+        items = []
+        for block in blocks:
+            blockdate = block.xpath('h2[@class="event_date-title"]/'
+                                    'text()').extract()
+            # Deal with non-ascii
+            if not blockdate:
+                return []
+            else:
+                blockdate = blockdate[0].encode('utf-8')
+                # format portegeuse date
+                # Terca-Feira 1 Julho
+                # Annoyingly it seems month is sometimes english!
+                # Segunda 30 June for e.g!
+                blockdate = convMonth(blockdate)
+                # Also remove the -Feira
+                blockdate = blockdate.replace('-Feira', '')
+                # NB \xe1 is the hex rep of unicode code pt 225
+                # rep small letter a with acute accent. Need to
+                # encode utf-8 say, then you'll have a different
+                # hex representing that encoding.
+                try:
+                    old_loc = locale.getlocale(locale.LC_TIME)
+                    # Portugeuse locale
+                    locale.setlocale(locale.LC_ALL, 'pt_PT.utf8')
+                    blockdate = [pdt.strptime(blockdate, '%A %d %B').strftime('%m %d')]
+                    locale.setlocale(locale.LC_TIME, old_loc)  # set back locale
+                except ValueError as e:
+                    print ("[ERROR %s]: \033[7m\033[31m ValueError: %s for URL:"
+                        " %s \033[0m" % (self.name, e, response.url[20:]))
+                    print ('\033[31m [%s ERROR:] Locale check: %s'
+                        ' \033[0m' %
+                        (self.name,
+                            [pdt.strptime('2014-05-05', '%Y-%m-%d').strftime('%A, %d %B %Y')]))
+                    print ("[ERROR %s]: \033[7m\033[31m Date dump: %s."
+                        " SKIP. \033[0m" % (self.name, blockdate))
+                    continue
+
+                events = block.xpath('div[@class="event_date-content"]/'
+                                    'div[@class="event_path"]/'
+                                    'div[@class="event_path_content"]/'
+                                    'div[starts-with(@class, "event")]')
+                for event in events:
+
+                    item = EventItem()
+
+                    # time(more reliable to get eventName with odds)
+                    # title:
+                    title = event.xpath('h2[@class="event-title"]/text()').extract()
+                    try:
+                        title = title[2].strip()
+                        time = title.split(' - ')[2]
+                    except IndexError as e:
+                        print ("[ERROR %s]: \033[7m\033[31m IndexError: %s for URL:"
+                            " %s \033[0m" % (self.name, e, response.url[20:]))
+                        print ("[ERROR %s]: \033[7m\033[31m  title dump: %s"
+                            "\033[0m" % (self.name, title))
+                        time = ''
+
+                    item['eventDate'] = blockdate
+                    item['eventTime'] = time
+
+                    # Odds and event name
+                    # Buttons
+                    buttons = event.xpath('div[@class="event_content"]/'
+                                        'div[starts-with(@class,"market")]/'
+                                        'table[@class="events"]/tr[@class="event"]')
+
+                    team1 = buttons.xpath('td[1]/a/div/'
+                                        'span[@class="name ellipsis"]'
+                                        '/text()').extract()
+
+                    team2 = buttons.xpath('td[3]/a/div/'
+                                        'span[@class="name ellipsis"]'
+                                        '/text()').extract()
+                    if team1 and team2:
+                        item['eventName'] = [team1[0]+' V '+team2[0]]
+
+                    # Odds
+                    item['odd1'] = buttons.xpath('td[1]/a/@data-price-decimal').extract()
+                    item['odd3'] = buttons.xpath('td[2]/a/@data-price-decimal').extract()
+                    item['odd2'] = buttons.xpath('td[3]/a/@data-price-decimal').extract()
+
+                    items.append(item)
+        return items

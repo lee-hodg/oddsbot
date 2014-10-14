@@ -1,0 +1,212 @@
+from __future__ import division
+from scrapy.conf import settings
+from scrapy.spider import Spider
+# from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+# from time import time
+LOG_DIR = settings['LOG_DIR']
+import dateutil.parser
+import math
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+
+def getOddsRounded(odds):
+
+    '''
+    This appears to be the function used by Setantabet
+    to round the odds before doing the standard am2dec conv.
+    I found this function by examing the DOM in firebug (note
+    you can right-click func on rhs and copy and paste in a js
+    beautifier without having to dig around all the js files)
+    I ultimately grabbed it from chrome dev, as firebug was playing up
+    : enter the console and type window to get the equiv of dom then do a search
+    . Function names of interest: decimalOddsToAmerican, getOddsFromAmerican,
+    getOddsFromAmericanToEU,hongKongToDecimal, getOddsRounded...chrome say this
+    in global.js
+    '''
+    if math.fabs(odds) < 600:
+        outOdds = int(round(odds/5)) * 5
+        if outOdds == -100:
+            return 100
+        else:
+            return outOdds
+    elif (odds > -1000 and odds < 0):
+        return math.floor(odds / 5) * 5
+    else:
+        return math.floor(odds / 25) * 25
+
+
+def am2dec(odd):
+    '''
+    Convert US odds to Decimal style.
+    '''
+    if odd in ['EV', 'ev', 'even', 'evens']:
+        return odd
+
+    try:
+        odd = float(odd)
+    except ValueError:
+        return -1
+
+    # first round the odds like setantabet do
+    odd = getOddsRounded(odd)
+
+    # retrun formatted 2d
+    if odd <= -100:
+        return "%0.2f" % (1-(100/odd))
+    else:
+        return "%0.2f" % (1+(odd/100))
+
+
+class HeavenbetSpider(Spider):
+
+    name = "Heavenbet"
+
+    # Visit the football homepage first
+    def start_requests(self):
+        yield Request(url='http://betting.pokerheaven.com/soccer/',
+                      callback=self.preLeague)
+
+    def preLeague(self, response):
+
+        # First make the AJAX req for league data
+        base_url = 'http://betting.pokerheaven.com/pagemethods.aspx/'
+        GETstr = 'getBranchFilters?branchId=1'
+        headers = {'RequestTarget': 'AJAXService',
+                   'Referer': 'http://betting.pokerheaven.com/soccer/',
+                   }
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parseLeague, dont_filter=True)
+
+    def parseLeague(self, response):
+
+        # Data comes in list like format
+        # Strictly this is a js array
+        # (try var test = ... in firebug console)
+        # json.loads will not work because of the
+        # sections like [45,,,,,56]. Need to
+        # first re replace (collapse)
+        # jsonstr = re.sub("[,]{2,}", ",", response.body)
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        jsonBody = json.loads(jsonstr)
+        leagues = []
+        # Get leagues
+        for child in jsonBody:
+            # (id,name) = (child[0], child[1)]
+            leagues.append((child[0], child[1]))
+
+        # Build request for each league
+        base_url = 'http://betting.pokerheaven.com/pagemethods.aspx'
+        headers = {'Content-Type': ('application/x-www-form-urlencoded;'
+                   'charset=UTF-8'),
+                   'Referer': 'http://betting.pokerheaven.com/soccer/',
+                   'RequestTarget': 'AJAXService'}
+        for (lid, name) in leagues:
+            GETstr = '/GetLeaguesContent?'
+            GETstr += 'BranchID=1&LeaguesCollection=%s' % lid
+            yield Request(url=base_url+GETstr, headers=headers,
+                          callback=self.pre_parseData, dont_filter=True)
+
+    def pre_parseData(self, response):
+
+        # Once against resp is js array
+        # jsonstr = re.sub("[,]{2,}", ",", response.body)
+        # Use null insted of collapsing to fill ,,
+        # keeps array indices fixed independent of data being there.
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        jsonBody = json.loads(jsonstr)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" \
+              % (self.name, response.url[20:])
+
+        eventSelection = jsonBody[0][1]
+
+        mkt_ids = []  # market ids for events in league
+        metaDict = {}  # pass on eventnames, dates in meta
+        if eventSelection:
+            # Sometimes 0 if just outrights.
+            for event in eventSelection:
+                # event id
+                eid = event[0]
+
+                # eventName
+                team1 = event[1]
+                team2 = event[2]
+                eventName = [team1+' V '+team2]
+
+                # date and time
+                dateandtime = event[4]  # 2014-06-25T09:30:00.0000000
+
+                # 1x2 odds
+                # I think rest is other mkts
+                # i.e. when press +23 say.
+                # NB even the correct 1x2 req will often come
+                # back with some asian 0.25 or 2.5 mkt too
+                mid = None
+                try:
+                    for mkt in event[5]:
+                        if mkt[1] == 0:  # 0 signifies 1x2
+                            mid = mkt[0]
+                except KeyError:
+                    continue
+                if mid:
+                    mkt_ids.append(mid)
+                    metaDict[mid] = {'eventName': eventName,
+                                     'eid': eid,
+                                     'dateandtime': dateandtime
+                                     }
+
+        # Build odds data request for league
+        base_url = 'http://betting.pokerheaven.com/pagemethods.aspx'
+        base_url += '/UpdateEvents'
+        headers = {'RequestTarget': 'AJAXService',
+                   'Referer': 'http://betting.pokerheaven.com/soccer/'}
+        GETstr = "?requestString="
+        for id in mkt_ids:
+            # build GETstr
+            GETstr += '%s@' % id
+        if GETstr:
+            GETstr = GETstr[:-1]  # Knock off final @
+        # Make request for all 1x2 odds data for league
+        # passing along eventNames and datetimes keyed by mid
+        # in the meta
+        yield Request(url=base_url+GETstr, headers=headers,
+                      callback=self.parseData, meta=metaDict)
+
+    def parseData(self, response):
+
+        # Once against resp is js array
+        # jsonstr = re.sub("[,]{2,}", ",", response.body)
+        jsonstr = re.sub(",(?=,)", ",null", response.body)
+        jsonBody = json.loads(jsonstr)
+
+        # get odds
+        metaDict = response.meta
+        items = []
+        for mktData in jsonBody:
+            item = EventItem()
+            mid = mktData[0]
+            # Get event data we passed in meta by mid
+            evData = metaDict[mid]
+            item['eventName'] = evData['eventName']
+            if evData['dateandtime']:
+                date_parsed = dateutil.parser.parse(evData['dateandtime'])
+            item['eventDate'] = [date_parsed.strftime('%m %d')]
+            item['eventTime'] = [date_parsed.strftime('%H:%M')]
+            # oddsData
+            oddsData = mktData[2][0][1]  # 1x2 data is first
+            if oddsData:
+                item['odd1'] = [am2dec(oddsData[1])]
+                item['odd3'] = [am2dec(oddsData[3])]
+                item['odd2'] = [am2dec(oddsData[5])]
+                items.append(item)  # validate in pipelines.py
+            else:
+                print "[ ERROR %s]: \033[7m No oddsData for:  %s \033[0m" \
+                      % (self.name, response.url)
+        return items

@@ -1,0 +1,73 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime, re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#%m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+class TotesportSpider(Spider):
+    name = "Totesport"
+
+    # This needs to be disabled when making extra requests
+    #allowed_domains = ["totesport.com"] 
+    
+    start_urls = ['http://www.totesport.com/portal?action=GoCategory&category=Football&Sports-Betting-Football'] 
+
+    #you must retain the name 'parse' with basic spider!   
+    def parse(self, response):  
+        #parse league links
+
+        sel = Selector(response)
+	
+	league_links = sel.xpath('//div[@id="nav"]//ul[@id="sport_menu"]//li/a/@href').extract()
+        #remove some junk competitions
+        league_links = [link for link in league_links if ('action=GoRegion' in link) and ('&region_id=10' not in link)]      
+
+        #make GET request
+	headers = {'Referer':'http://www.totesport.com/portal?action=GoCategory&category=Football&Sports-Betting-Football'}
+	for link in league_links:
+            yield Request(url=link, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        sel = Selector(response)
+
+	eventSelection = sel.xpath('//table[@class="market_table"]//tr')
+
+	
+	items = []
+	for event in eventSelection:
+    
+                item = EventItem()
+    
+                #eventName
+                item['eventName'] = event.xpath('td[@class="sel"]/a/text()').extract()
+
+                #datetime format for Totesport: 29 Mar 2014 - 15:00
+	        dateandtime = event.xpath('td[@class="date_time"]/text()').extract()
+                date= [] 
+                time = []
+                if dateandtime:
+                    #if not []
+                    date = [datetime.datetime.strptime(dateandtime[0], '%d %b %Y - %H:%M').strftime('%m %d')]
+                    time = [datetime.datetime.strptime(dateandtime[0], '%d %b %Y - %H:%M').strftime('%H:%M')]
+
+                item['eventDate'] = date
+	      	item['eventTime'] = time
+      
+                #odds
+               	item['odd1'] = event.xpath('td[4][@class="odds"]/a/text()').extract() 
+                item['odd3'] = event.xpath('td[5][@class="odds"]/a/text()').extract() #our conv is odd3 is draw
+      	        item['odd2'] = event.xpath('td[6][@class="odds"]/a/text()').extract()
+     
+                items.append(item)  #validate in pipelines.py
+
+	return items

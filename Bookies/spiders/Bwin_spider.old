@@ -1,0 +1,141 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class BwinSpider(Spider):
+    name = "Bwin"
+    allowed_domains = ["bwin.com"]
+
+    # Visit the football homepage first 
+    def start_requests(self):
+        yield Request(
+        url='https://sports.bwin.com/en/sports/4/betting/football#sportId=4',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):  
+
+        sel = Selector(response)
+
+        #Country names from nav-top-list
+        #country_names = sel.xpath('//ul[@id="nav-top-list"]//li[@class="nav-toggle"]//span[@class="nav-region-name"]/text()').extract()
+        #country names from nav-more-list(hidden)
+        #country_names += sel.xpath('//ul[@id="nav-more-list"]//li[@class="nav-toggle"]//span[@class="nav-region-name"]/text()').extract()
+
+        #League links from nav and hidden 'more' nav.
+        links=sel.xpath('//ul[@id="nav-top-list"]//li[@class="nav-toggle"]/ul//li/a/@href').extract()
+        links+=sel.xpath('//ul[@id="nav-more-list"]//li[@class="nav-toggle"]/ul//li/a/@href').extract()
+         
+        base_url='https://sports.bwin.com'
+        for link in links:
+            #print link.url
+            yield Request(base_url+link, callback=self.parse_Data)
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+        
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        #Check first that we only get 3way types
+        resType = sel.xpath('//div[@id="markets"]//div[@class="ui-widget-content"]/div[@class="ui-widget-content-body"]/ul/li/h2/text()').extract()
+        if '3Way' not in resType[0]: 
+            #return
+            return []
+
+        #get events
+        eventSelection = sel.xpath('//div[@id="markets"]//div[@class="ui-widget-content"]/div[@class="ui-widget-content-body"]/ul/li/ul/li')
+
+        items = []
+        for event in eventSelection:
+
+               item = EventItem()
+
+               #######################################################################
+               ########################DATE AND TIME##################################
+               #######################################################################
+            
+               #date
+               date=[]
+               date= event.xpath('h2/text()').extract() #u'\r\n                Thursday - 6/5/2014\r\n\r\n        '
+               if date:
+                    # Standarise formatting  to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    date=date[0].strip()
+                    date=date.split('-')[1].strip()#'6/5/2014
+                    try:
+                        date = datetime.datetime.strptime(date, '%d/%m/%Y').strftime('%m %d')
+                    except ValueError as e:
+                        if "unconverted" in str(e):
+                            # sometimes date is of format %d.%m.%y so deal with that
+                            try:
+                                date = datetime.datetime.strptime(date, '%d.%m.%y').strftime('%m %d')
+                                print '[INFO %s]: \033[7m Fixed the date in d.m.y to: %s \033[0m' % (self.name,date)
+                            except ValueError as e:
+                                print '[ERROR %s]:\033[7m\033[31m ValueError %s raised again for site: %s. Even aft try other format date. \033[0m' % (self.name, e, response.url)
+                                print '[ERROR %s]: Date and/or time badly formated?:', date, time
+                                return EventItem()
+                    except TypeError as e:
+                        print '[ERROR %s]:\033[7m\033[31 TypeError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+                        print '[ERROR %s]: Date and/or time badly formated?:', date, time
+                        return EventItem()
+
+               item['eventDate'] = [date]
+
+               #time
+               time=[]
+               time = event.xpath('ul/li/div/div/ul/li[@class="listing"]/div/h6/text()').extract()
+               if time:
+                    # Standarise formatting  to 24HR.
+                    try:
+                        time = datetime.datetime.strptime(time[0], '%I:%M %p').strftime('%H:%M')
+                    except TypeError as e:
+                        print '[ERROR %s]:\033[7m\033[31 TypeError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+                        print '[ERROR %s]: Date and/or time badly formated?:', date, time
+                        pass #we don't necessarily need time, no need to ditch the event.
+
+               item['eventTime'] = [time]
+
+               #######################################################################
+               ########################EVENT NAME#####################################
+               #######################################################################
+
+               teams=event.xpath('ul/li/div/div/ul/li[@class="listing"]/div/table[@class="options"]/tr[@class="col3 three-way"]//td/form/button/span[@class="option-name"]/text()').extract()              
+               if teams[0] and teams[2]:
+                   item['eventName'] = [teams[0]+' V '+teams[2]]
+
+               #######################################################################
+               ########################ODDS###########################################
+               #######################################################################
+
+               item['odd1'] = []
+               item['odd3'] = []
+               item['odd2'] = []
+               odds=teams=event.xpath('ul/li/div/div/ul/li[@class="listing"]/div/table[@class="options"]/tr[@class="col3 three-way"]//td/form/button/span[@class="odds"]/text()').extract()
+               if odds:
+                   try:
+                       item['odd1'] = [odds[0]]
+                   except IndexError:
+                       pass
+                   try:
+                       item['odd3'] = [odds[1]]
+                   except IndexError:
+                       pass
+                   try:
+                       item['odd2'] = [odds[2]]
+                   except IndexError:
+                       pass
+
+               items.append(item)  
+        return items
+
+

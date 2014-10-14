@@ -1,0 +1,153 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime,re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+
+    try:
+        link = str(link)
+    except UnicodeEncodeError:
+        link = link.encode('utf-8')
+
+    junkPhrases = [
+                  'Betclic',
+                  'Enhanced Odds',
+                  'Special',
+                  ]
+
+    exceptionPhrases = []
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name, link)
+            return True
+
+    return False  #don't filter rest
+
+
+
+class BetclicSpider(Spider):
+    name = "Betclic"
+    allowed_domains = ["betclic.com"]
+
+    # Visit the football homepage first
+    def start_requests(self):
+        yield Request(
+        # url='https://en.betclic.com/calendar/football-s1i1',
+        url = 'https://en.betclic.com/football-s1',
+        callback=self.parse_leagues
+        )
+
+    def parse_leagues(self, response):
+
+
+        sel = Selector(response)
+
+        # Get league name (for filtering purposes) and league link
+        # names=sel.xpath('//nav[@id="main-nav"]/div[@class="wrapper"]/'
+        #                 'ul[@class="nav clearfix"]/li[3]/'
+        #                 'div[@class="nav-window"]/div[@class="nav-window-content clearfix"]'
+        #                 '/div[@class="nav-window-col"]/ul/li/a/text()').extract()
+        # league_links=sel.xpath('//nav[@id="main-nav"]/div[@class="wrapper"]/'
+        #                        'ul[@class="nav clearfix"]/li[3]/div[@class="nav-window"]'
+        #                        '/div[@class="nav-window-content clearfix"]'
+        #                        '/div[@class="nav-window-col"]/ul/li/a/@href').extract()
+
+        names = sel.xpath('//ul[@class="listAllCompet"]/li/a/text()').extract()
+        league_links = sel.xpath('//ul[@class="listAllCompet"]/li/a/@href').extract()
+        # zip
+        league_pairs = zip(names, league_links)
+
+        #remove unwanted links; returns True to filter out link
+        league_links = [link for (league_name, link) in league_pairs
+                        if not leagueFilter(self.name, league_name)]
+
+        #with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+        #    for pair in league_pairs:
+        #        print >> lfile, pair
+
+        base_url= 'https://en.betclic.com'
+        headers = {'Referer': 'https://en.betclic.com/calendar/football-s1i1'}
+
+        for link in league_links:
+            yield Request(url=base_url+link, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        # Betclic lists blocks with common date. For each block
+        # we can get the date from the data-date attr.
+        dateBlocks = sel.xpath('//div[@id="competition-events"]//div[@class="entry day-entry grid-9 nm"]')
+
+        items = []
+
+        for dblock in dateBlocks:
+            #set block date
+            blockdate = dblock.xpath('@data-date').extract() #[u'2014-6-12']
+            if blockdate:
+                # Standarise formatting  to %m %d (09 03).
+                # Convert to datetime obj first then back to desired str.
+                #more efficient to do this once here for whole block.
+                try:
+                    blockdate = [datetime.datetime.strptime(blockdate[0], '%Y-%m-%d').strftime('%m %d')]
+                except ValueError as e:
+                    print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                    print "[ERROR %s]: \033[7m\033[31m blockdate dump: %s. SKIP." % (self.name, blockdate)
+                    continue #skip without date.
+
+            #event time is grouped in blocks!
+            timeBlocks = dblock.xpath('div[@class="schedule clearfix"]')
+            for tblock in timeBlocks:
+                #set block time
+                blocktime = tblock.xpath('div[@class="hour"]/text()').extract()
+                #get all events for this time and date
+                eventSelection = tblock.xpath('div[starts-with(@class,  "match-entry clearfix CompetitionEvtSpe")]')
+
+                for event in eventSelection:
+
+                    item = EventItem()
+
+                    #date and time
+                    item['eventDate'] = blockdate
+                    item['eventTime'] = blocktime
+
+                    # Get eventName.
+                    item['eventName'] = event.xpath('div[@class="match-name"]/a/text()').extract()
+                    if item['eventName']:
+                        #replace ' - ' with 'V' for vs
+                        item['eventName'] = [item['eventName'][0].replace(' - ',' V ')] #space around - imp
+
+
+                    # Get prices.
+                    #odd3 is draw
+                    item['odd1'] = event.xpath('div[@class="match-odds"]/div[@class="match-odd"][1]/span/text()').extract()
+                    item['odd3'] = event.xpath('div[@class="match-odds"]/div[@class="match-odd"][2]/span/text()').extract()
+                    item['odd2'] = event.xpath('div[@class="match-odds"]/div[@class="match-odd"][3]/span/text()').extract()
+
+                    items.append(item)  #only append if at least one odd found
+
+        return items
+

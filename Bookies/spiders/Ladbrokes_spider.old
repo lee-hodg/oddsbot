@@ -1,0 +1,159 @@
+from scrapy.conf import settings
+from scrapy.contrib.spiders import Rule
+from scrapy.spider import Spider
+from scrapy.contrib.linkextractors.sgml import SgmlLinkExtractor
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request, FormRequest
+import datetime
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 31 format
+#betfair etc will store full event date with year for django
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
+
+class LadbrokesSpider(Spider):
+    name = "Ladbrokes"
+    allowed_domains = ["ladbrokes.com"]
+
+    # Visit the football homepage first to set the
+    # session cookie required.
+    # Needed for subsequent ajax requests, otherwise server rejects
+    # (would need to use sessions in python requests lib).
+    def start_requests(self):
+        yield Request(
+        url='http://sportsbeta.ladbrokes.com/football',
+        callback=self.request_links
+        )
+
+    # This is callback of start_requests, so after we visit football home
+    # we make the ajax form request to the server to get the list of competition links
+    # you can see the form params in firebug or chrome, and for url percent encoded things
+    # e.g. `%23` means `#`, leave the # as is, as request itself will do encoding, unlike curl
+    # where the raw percent encoded data is needed. Session cookies from our visit to football
+    # home will be automatically handled.
+    def request_links(self, response):
+        # yield FormRequest(
+        # url='http://sportsbeta.ladbrokes.com/view/EventDetailPageComponentController',
+        #formdata={'N': '4294966750',
+        #         'form-trigger': 'moreId',
+	#	 'moreId': '156#327',
+ 	#	 'pageType': 'EventClass'},
+
+        #27apr2014 changed:
+        #facetCount_157#333=8&
+	#moreId=156#335&
+	#facetCount_156#335=12&
+
+
+       #  formdata={'N': '4294966750',
+       #  	  'facetCount_156#335': '12',
+       #  	  'facetCount_157#333': '8',
+       #  	  'form-trigger': 'moreId',
+       #  	  'moreId': '156#335',
+       #  	  'pageId': 'p_football_home_page',
+       #  	  'pageType': 'EventClass'
+       #  },
+       #  headers={'Referer': 'http://sportsbeta.ladbrokes.com/football'},
+       #  callback=self.parse_leagues
+       #  )
+
+        base_url = 'http://sportsbeta.ladbrokes.com/view/content/flyoutfootball2?'
+        GETstr = ('flyoutoption=true&seeallurl=http%3A%2F%2Fsportsbeta.ladbrokes.com%2F'
+                'football&flyoutIdentifier=flyoutfootball2&_=1410714538943')
+        headers = {'Host': 'sportsbeta.ladbrokes.com',
+                'Referer': 'http://sportsbeta.ladbrokes.com/football',
+                'X-Requested-With': 'XMLHttpRequest'}
+        yield Request(url=base_url+GETstr, headers=headers, dont_filter=True,
+                      callback=self.parse_leagues)
+
+
+    def parse_leagues(self, response):   #you must retain the name parse here!
+
+        # You could do this with selectors and xpath instead, but do it here with linkExtractor
+        # NB. this excludes premier-league and a few others because for those we have no country before
+        # could prob just opt for SgmlLinkExtractor() and get the lot possibily with a couple of deny= in
+        # or do the following:
+        sx = SgmlLinkExtractor(allow=[r'http://sportsbeta.ladbrokes.com/[A-Za-z0-9-]+/[A-Za-z0-9-]+/Football-N-[A-Za-z0-9-]+/',
+                                      r'http://sportsbeta.ladbrokes.com/[A-Za-z0-9-]+/Football-N-[A-Za-z0-9-]+/'
+                                     ])
+        links = sx.extract_links(response)
+
+        # with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as lfile:
+        #     print >>lfile, '*'*100
+        #     for link in links: print >>lfile, link
+        #     print >>lfile, '*'*100
+
+        # Now for each of these link make Request to parse_Data
+        # NB. The basic GET request is fine.
+        # NB. Important to get the url from the link object
+        # to form the Request, and not send link itself.
+        for link in links:
+            yield Request(link.url, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+        sel = Selector(response)
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        eventSelection = sel.xpath('//table[@class="generic-table football"]/tbody//tr')
+
+        items = []
+        for event in eventSelection:
+               item = EventItem()
+
+               # Remember xpath puts everything into list, even if single item.
+               # Thus, to strip:
+               dateandtime = [x.strip() for x in event.xpath('td[2]/text()').extract()]
+
+               if dateandtime:          #datetime could be 15:00, Tomorrow 15:00, or 9 Mar 11:30
+                   date = [dateandtime[0][:-5].strip()] #if just time date will be []
+                   item['eventTime'] = [dateandtime[0][-5:]]
+
+               else:
+                   # no datetime at all
+                   date = []
+                   item['eventTime'] = []
+
+               # Format date as desired.
+               if not date:
+                    #assume today (as often bookies miss date if event today)
+                    date = [today.strftime('%m %d')]
+               elif  "Tomorrow" in date:
+                    tmoz = today + datetime.timedelta(days=1)
+                    date = [tmoz.strftime('%m %d')]
+               elif  "Today" in date:
+                    date = [today.strftime('%m %d')]
+               elif date != [] and date != [u'']:
+                    # Standarise formatting frp, %d %b (09 Mar) to %m %d (09 03).
+                    # Convert to datetime obj first then back to desired str.
+                    try:
+                        date = [datetime.datetime.strptime(date[0], '%d %b').strftime('%m %d')]
+                    except ValueError as e:
+                        try:
+                            #try format 01 Jan 2015
+                            date = [datetime.datetime.strptime(date[0], '%d %b %Y').strftime('%m %d')]
+                        except ValueError as e:
+                             print "[ERROR %s]: \033[7m\033[31m ValueError: %s for URL: %s \033[0m" % (self.name, e, response.url[20:])
+                             print "[ERROR %s]: \033[7m\033[31m Tried d b, d.b.Y no luck \033[0m" % (self.name)
+                             print "[ERROR %s]: \033[7m\033[31m Date dump: %s" % (self.name, date)
+                             continue
+
+               item['eventDate'] = date
+
+               # Get eventName.
+               item['eventName'] = event.xpath('td[@class="event"]/a/span/text()').extract()
+
+               # Get prices.
+               item['odd1'] = event.xpath('td[5][@class="price"]/a/strong/text()').extract()
+               item['odd3'] = event.xpath('td[6][@class="price"]/a/strong/text()').extract() #our conv is odd3 is draw
+               item['odd2'] = event.xpath('td[7][@class="price"]/a/strong/text()').extract()
+               items.append(item)  #validate in pipelines.py
+
+        return items
+
+

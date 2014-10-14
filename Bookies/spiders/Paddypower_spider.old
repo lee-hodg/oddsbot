@@ -1,0 +1,142 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+import os
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#the data seems to come with the initial GET request,
+#but it is stored in the `lb_fb_cpn_init(...)` function
+#, which presumably creates some HTML from it. Thus we seem
+#to have two choices: 1) rip the JSON like data from between
+#the <script> tags of the initial GET, then parse them with some
+#python, or 2) use Selenium webdriver to get the js version of the
+#response.
+
+#ripping with selenium quite slow, try options 1 instead.
+#NB you could also try regexs like
+#_re = re.compile(r'document\.bodyOnLoad\.push\(function\(\) {.*lb_fb_cpn_init\((.*)\);.*}\);', re.DOTALL)
+# x = wanted_script.re(_re)[0].split('fb_tab_id')[0].strip().rstrip(');').strip()
+# json.loads(x)
+#but the problem was fpghost84: The last chunk isn't valid JSON
+#as the property names aren't quoted. I guess you could pursue refinding this regex though.
+#However a simpler way is simply:
+#json.loads(wanted_script.extract().splitlines()[14][:-1])
+
+
+def leagueFilter(name, link):
+    #
+    # If any of these phrases in the link
+    # we deem link as junk, and do not want to scrape it.
+    #
+    junkPhrases = ['coupon',
+                   'score',
+                   'top-matches',
+                   'action=go_fb',
+                   'acca-bonus',
+              	   'uk-both-teams-to-score',
+                   'today-and-tomorrow',
+                   'win-draw-win-both-teams-to-score',
+                   'my-matches',
+                   'football-outrights',
+                   'football-specials',
+                   'teams',
+                   'Germany-Bundesliga-1',   #these are to simply avoid duplicating, we use the germany link, rather than league etc.
+                   'France-Ligue-1',
+                   'over',
+                   'spanish-la-liga-matches',
+                   'scottish-league-cup-matches',
+                   'scottish-premiership-matches',
+                   'serie-a'
+                  ]
+
+    exceptionPhrases = ['bosnian-premier-league-coupon']
+
+    for phrase in exceptionPhrases:
+        #don't filter exceptions
+        if phrase in link:
+            return False
+
+    for phrase in junkPhrases:
+        if phrase in link:
+            print "[INFO %s]: \033[7m Filtering out link: %s \033[0m" % (name,link)
+            return True
+
+    return False  #don't filter rest
+
+
+class PaddypowerSpider(Spider):
+    name = "Paddypower"
+    allowed_domains = ["paddypower.com"]
+
+    start_urls=['http://www.paddypower.com/football/football-matches']
+
+    #first get the league links
+    def parse(self, response):
+        sel = Selector(response)
+
+        league_links =sel.xpath('//ul[@id="nav_quicklinks"]/li[@class="on"]/ul//li/a/@href').extract()
+        #remove unwanted links, returns True to filter out link
+        league_links = [link for link in league_links if not leagueFilter(self.name, link)]
+
+        with open(os.path.join(LOG_DIR, self.name + '_leagues.log'),'w') as linksf:
+            for link in league_links:
+                print >> linksf, link
+                yield Request(link, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+
+        sel = Selector(response)
+        all_scripts = sel.xpath('//script')
+        wanted_script = [script for script in all_scripts if 'lb_fb_cpn_init' in script.extract()]
+        print "[INFO %s]: \033[7m Number of wanted scripts: \033[34m %s \033[0m" % (self.name, len(wanted_script))
+        try:
+            wanted_script = wanted_script[0]
+        except IndexError as e:
+            print '[ERROR %s]:\033[7m\033[31m IndexError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+            print '[ERROR %s]:\033[31m\033[7m Getting wanted scripted:, it has %s elements \033[0m' % (self.name, len(wanted_script))
+            return EventItem() #return nothing
+
+        jsonEventsData = json.loads(wanted_script.extract().splitlines()[14][:-1])
+        jsonOddsData = json.loads(wanted_script.extract().splitlines()[16][:-1])
+
+        items = []
+        for jsonEvent in jsonEventsData:
+            item = EventItem()
+            item['eventName'] = [jsonEvent['names']['en']]
+            dateandtime = jsonEvent['start_time'] #u'2014-03-13 00:00:00'
+
+
+            for jsonOdd in jsonOddsData:
+                if jsonEvent['ev_id'] == jsonOdd['ev_id']:
+                    if jsonOdd['fb_result'] == 'D':
+                        #draw
+                        item['odd3'] = [jsonOdd['lp_num']+'/'+jsonOdd['lp_den']]
+                    elif jsonOdd['fb_result'] == 'H':
+                        #home
+                        item['odd1'] = [jsonOdd['lp_num']+'/'+jsonOdd['lp_den']]
+                    elif jsonOdd['fb_result'] == 'A':
+                        #away
+                        item['odd2'] = [jsonOdd['lp_num']+'/'+jsonOdd['lp_den']]
+
+            date = [datetime.datetime.strptime(dateandtime, '%Y-%m-%d %H:%M:%S').strftime('%m %d')]
+            time = [datetime.datetime.strptime(dateandtime, '%Y-%m-%d %H:%M:%S').strftime('%H:%M')]
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            items.append(item)
+
+        return items
+

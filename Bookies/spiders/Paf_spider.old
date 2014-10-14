@@ -1,0 +1,117 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import json
+import re
+LOG_DIR = settings['LOG_DIR']
+
+#since no bookie will list the year,we work
+#with only month and date in the 12 -31 format
+#so we'll standardise all formatting from books as %m %d
+today = datetime.datetime.now() #datetime obj, will need str later with .strftime('%m %d')
+
+#
+# Just like unibet and 888, Paf uses Kambi api.
+# Page load loads 'Kambi betting client'
+# ,which is a swf. But we can still replicate
+# its requests to API to get the raw JSON data.
+#
+
+class PafSpider(Spider):
+    name = "Paf"
+    allowed_domains = ["paf.com", "kambi.com"]
+    
+    #incase cookie is needed
+    start_urls=['https://www.paf.com/betting/#/group/1000093190/category/1295']
+   
+    #first make the leagues request to kambi API
+    def parse(self, response):
+        sel = Selector(response)
+        #api can vary between api, e-api,e1-api, e2-api,e3-api but only api seems to work.
+        base_url= 'https://api.kambi.com/offering/api/v2/paf/group.json?'
+        GETstr='depth=4&market=gb&lang=en_GB&suppress_response_codes&channel_id=1'
+        headers = {'Referer': 'https://c3-static.kambi.com/sb-bettingclient/client/paf/1.61.0.5/bettingclient-shell.swf'}
+
+        yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_leagues)
+
+    def parse_leagues(self,response):
+
+        #extract the needed params from the JSON response
+        jResp=json.loads(response.body)
+        groups = jResp['group']['groups']
+        for g in groups:
+            if g['name'] == 'Football': football = g
+        if football:
+            footballGroups = football['groups']
+
+        #build list of country Ids, needed to call API.
+        IdsList=[]
+        for country in football['groups']:
+            IdsList.append(country['id'])
+
+        GETstr= 'cat=1295&market=gb&lang=en_GB&range_size=100&range_start=0&suppress_response_codes&channel_id=1'
+        headers= {'Referer': 'https://c3-static.kambi.com/sb-bettingclient/client/paf/1.61.0.5/bettingclient-shell.swf'}
+
+        unwanted = ['1000094254',] #unwanted ids
+        for id in IdsList:
+            if id not in unwanted:
+                base_url =  'https://api.kambi.com/offering/api/v2/paf/betoffer/group/'+str(id)+'.json?'
+                yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+
+
+    def parse_Data(self, response):
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name,response.url[20:])
+             
+        jResp=json.loads(response.body)
+        
+        try:
+            jsonEventsData = jResp['events']
+            jsonOddsData = jResp['betoffers']
+        except KeyError as e:
+            print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+            print "[ERROR %s]: \033[7m\033[31m Error response or 404? \033[0m" % (self.name)
+            print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name,jResp)
+            return EventItem(odd1=[],odd2=[],odd3=[], eventName=[], eventDate=[],eventTime=[])
+
+        items = []
+        for jsonEvent in jsonEventsData:
+            item = EventItem()
+
+            #eventName. Do it this way rather than grabbing Name,
+            #or it can be hard to parse teams in cleaner with ' - ' also in some team names.
+            homeName = jsonEvent['homeName']
+            awayName = jsonEvent['awayName']
+            item['eventName'] = []
+            if homeName and awayName:
+                item['eventName'] = [homeName+' V '+awayName] 
+
+
+            # date and time
+            dateandtime = jsonEvent['start'] #2014-03-23T17:30Z
+            date = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%MZ').strftime('%m %d')]
+            time = [datetime.datetime.strptime(dateandtime, '%Y-%m-%dT%H:%MZ').strftime('%H:%M')]
+            item['eventDate'] = date
+            item['eventTime'] = time
+
+            # odds
+            for jsonOdd in jsonOddsData:
+                if jsonEvent['id'] == jsonOdd['eventId']:
+                    for outcome in jsonOdd['outcomes']:
+                        if outcome['type'] == 'OT_ONE':
+                            #home
+                            item['odd1'] = [outcome['oddsFractional']]
+                        elif outcome['type'] == 'OT_CROSS':
+                            #draw
+                            item['odd3'] = [outcome['oddsFractional']]
+                        elif outcome['type'] == 'OT_TWO':
+                            #home
+                            item['odd2'] = [outcome['oddsFractional']]
+        
+            
+            items.append(item)
+        return items
+        

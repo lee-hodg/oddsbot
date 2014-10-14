@@ -1,0 +1,177 @@
+from scrapy.conf import settings
+from scrapy.spider import Spider
+from scrapy.selector import Selector
+from Bookies.items import EventItem
+from scrapy.http import Request
+import datetime
+import time
+import json
+LOG_DIR = settings['LOG_DIR']
+
+# c.f. Teambet, Jetbull, Betredkings, Guts group
+
+# %m %d, we will standardise bookie formating like that.
+today = datetime.datetime.now()
+
+
+class Betredkingspider(Spider):
+    name = "Betredkings"
+
+    start_urls = ['https://bet.redkings.com/']
+
+    # you must retain the name 'parse' with basic spider!
+    def parse(self, response):
+
+        # utc timestamp in milliseconds since unix epoch, not seconds.
+        stamp = str(int(time.time() * 1000))
+
+        base_url = 'https://sportsfront.redkings.com/'
+        GETstr = 'fe_allOddsSpAjax?sp=1&_='+stamp
+        headers = {'X-Requested-With': 'XMLHttpRequest'}
+        # we could rip cmSession cookie
+        # and construct the Refererer from it
+        # if needed.
+
+        yield Request(url=base_url+GETstr,
+                      headers=headers,
+                      callback=self.pre_parse_countries, dont_filter=True)
+        # This don't filter is very useful
+        # The VALII was once set, but subsequent
+        # requests for cmSession etc, mean it gets lost
+        # needs to be reset. Thus this req cannot send the
+        # VALII cookie automatically, so gets redirected to
+        # set that cookie. However scrapy will filter out duplicate
+        # request normally.
+
+    def pre_parse_countries(self, response):
+
+        sel = Selector(response)
+
+        # make request for league links
+
+        # Get rel links for each country to request league sublinks
+        links = sel.xpath('//div[@class="Country"]/a[@class="Country AllOddsMenu"]/@rel').extract()
+        # Get names too (might be useful for filtering)
+        cnames = sel.xpath('//div[@class="Country"]/a[@class="Country AllOddsMenu"]/@title').extract()
+        cnames = [name.encode('utf8').split('\xa0')[-1] for name in cnames]  # some formatting
+        # zip
+        countries = zip(cnames, links)
+
+        # stamp = str(int(time.time() * 1000))
+        base_url = 'https://sportsfront.redkings.com/'
+        headers = {'X-Requested-With': 'XMLHttpRequest'}
+        # Use regex to extract code (build link with 'sp' not 'sport')
+        # p=re.compile(r"\/fe_country\?sport=1&code=(?P<code>\d+)")
+        for country in countries:
+            # m = p.match(country[-1])
+            # code = m.group('code')
+            # GETstr = '/fe_country?sport=1&'+'code='+code+'&req=ajax&_='+stamp
+            GETstr = country[-1]
+            yield Request(url=base_url+GETstr,
+                          headers=headers,
+                          callback=self.parse_Data)
+#
+# In the future if want more than just match odds,
+# this would allow get sublist of leagues under countries,
+# and from leagues enter indiviudal events for more odds etc.
+#
+#    def parse_countries(self, response):
+
+#        sel = Selector(response)
+        # Get rel links for each country to request league sublinks
+#        links = sel.xpath('//div[@class="Tour "]/a[@class="Tour AllOddsMenu TournamentLink"]/@rel').extract()
+        # Get names too (might be useful for filtering)
+#        lnames =  sel.xpath('//div[@class="Tour "]/a[@class="Tour AllOddsMenu TournamentLink"]/@title').extract()
+#        lnames = [name.encode('utf8').split('\xa0')[-1] for name in lnames] #some formatting
+        # zip
+#        leagues = zip(lnames, links)
+
+#        stamp = str(int(time.time() * 1000))
+#        base_url = 'https://front.teambet1.com/'
+#        headers = {'X-Requested-With': 'XMLHttpRequest'}
+        # Use regex to extract code (build link with 'sp' not 'sport')
+#        p=re.compile(r"\/fe_tournament\?id=(?P<id>\d+)")
+#        for league in leagues:
+#            m = p.match(league[-1])
+#            id = m.group('id')
+#            GETstr = 'fe_allOddsTnAjax?tn='+id+'&_='+stamp
+#            yield Request(url=base_url+GETstr,
+#                                   headers= headers,
+#                                  callback=self.pre_parse_leagues)
+
+    def parse_Data(self, response):
+        #
+        # For each country, we can make the req=ajax to get the match odds
+        # for each league in that country at once. If want more than match odds,
+        # would need to parse sublist of leagues etc, see above.
+        #
+
+        print "[INFO %s]: \033[7m Going to parse data for URL: %s \033[0m" % (self.name, response.url[20:])
+
+        sel = Selector(response)
+
+        all_scripts = sel.xpath('//script')
+        wanted_script = [script for script in all_scripts if
+                         ('centralAreaTournamentSectionsJsonArray' in script.extract())
+                         and ('handleJsonelements' not in script.extract())]
+
+        print "[INFO %s]: Number of wanted scripts: \033[7m %s \033[0m" % (self.name, len(wanted_script))
+
+        try:
+            wanted_script = wanted_script[0]
+        except IndexError as e:
+            print '[ERROR %s]:\033[7m\033[31m IndexError %s raised for site: %s \033[0m' % (self.name, e, response.url)
+            print '[ERROR %s]:\033[31m\033[7m Getting wanted scripted:, it has %s elements \033[0m' % (self.name, len(wanted_script))
+            return EventItem()  # return nothing
+
+        # GET valid JSON from script.
+        w = wanted_script.extract().splitlines()[2:-2]
+        jsonStr = '[{'+' '.join(w)+'}]'
+        jsonData = json.loads(jsonStr)
+
+        # cycle through leagues
+        items = []
+        for league in jsonData:
+            print "[INFO %s]: \033[7m Going to parse data for league: %s \033[0m" % (self.name, league['name'])
+            for match in league['preliveMatchesSection']['matchesJsonArray']:
+                item = EventItem()
+
+                # eventName
+                homeName = match['matchInfo']['homeName']
+                awayName = match['matchInfo']['awayName']
+                item['eventName'] = []
+                if homeName and awayName:
+                    item['eventName'] = [homeName+' V '+awayName]
+
+                # date and time
+                date = match['matchInfo']['sdfDMYTime']  # 11/05
+                time = match['matchInfo']['sdfHourTime']  # 18:45
+                item['eventDate'] = [datetime.datetime.strptime(date, '%d/%m').strftime('%m %d')]
+                item['eventTime'] = time  # time already 24hr
+
+                # odds
+                item['odd1'] = []
+                item['odd3'] = []
+                item['odd2'] = []
+                oddsJSON = None
+                try:
+                    oddsJSON = match['marketWrapper']['oddsJsonArray']
+                except KeyError as e:
+                    print "[ERROR %s]: \033[7m\033[31m KeyError: %s \033[0m" % (self.name, e)
+                    print "[ERROR %s]: \033[7m\033[31m Simply no match odds? \033[0m" % (self.name)
+                    print "[ERROR %s]: \033[7m\033[31m response dump: %s \033[0m" % (self.name, match)
+
+                if oddsJSON:
+                    for odd in oddsJSON:
+                        if 'pos' in odd and 'ov' in odd:
+                            if odd['pos'] == u'pos_0':
+                                item['odd1'] = [odd['ov']]
+                            elif odd['pos'] == u'pos_1':
+                                item['odd3'] = [odd['ov']]
+                            elif odd['pos'] == u'pos_2':
+                                item['odd2'] = [odd['ov']]
+
+                # finally append item
+                items.append(item)  # validate in pipelines.py
+
+        return items
