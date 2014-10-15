@@ -87,7 +87,14 @@ class CoralSpider(Spider):
             price = take_first(result.xpath('div[@class="home-odds"]/div/'
                                             'span[@class="odds-fractional"]/text()').extract())
             if runnerName and price:
-                CSdict['runners'].append({'runnerName': runnerName, 'price': price})
+                if teams[1] in runnerName.lower():
+                    # Tag for score reversing by loader (e.g. if Team2 1-0 want
+                    # just 0-1 to match Betfair format and avoid team name comp)
+                    CSdict['runners'].append({'runnerName': runnerName,
+                                              'price': price, 'reverse_tag': True})
+                else:
+                    CSdict['runners'].append({'runnerName': runnerName,
+                                              'price': price, 'reverse_tag': False})
 
         # Add markets
         l.add_value('markets', [MOdict, CSdict])

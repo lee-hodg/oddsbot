@@ -4,6 +4,7 @@ from __future__ import division  # nice division
 import difflib  # for string comparison
 import unicodedata  # Normalize unicode by forcing to ascii equiv in compStr
 import datetime
+import pytz
 from arb import Arb
 
 # ======================LOGGING
@@ -53,14 +54,14 @@ conn = psycopg2.connect("dbname=arbs user=oddsbot password='oddsbot' host=localh
 with conn:
     cur = conn.cursor()
     initSQLcmd = "CREATE TABLE IF NOT EXISTS "
-    initSQLcmd += ("arbs_tab(Id SERIAL PRIMARY KEY, event_datetime TIMESTAMP,"
+    initSQLcmd += ("arbs_tab(Id SERIAL PRIMARY KEY, event_datetime TIMESTAMP WITH TIME ZONE,"
                    "sport TEXT, market_type TEXT,")
     initSQLcmd += ("competition TEXT, event_name TEXT, bet_on TEXT,"
                    "arb_value REAL, bookie_name TEXT, bookie_odd REAL,"
                    "exchange_name TEXT,")
     initSQLcmd += ("mid TEXT, exchange_odd1 REAL, exchange_stake1 REAL,"
                    "exchange_odd2 REAL, exchange_stake2 REAL,"
-                   "exchange_odd3 REAL, exchange_stake3 REAL, found_stamp TIMESTAMP)")
+                   "exchange_odd3 REAL, exchange_stake3 REAL, found_stamp TIMESTAMP WITH TIME ZONE)")
     cur.execute(initSQLcmd)
 
 
@@ -198,8 +199,13 @@ for event in events.find():
                                                 # giving Django timezone
                                                 # string.
                                                 try:
-                                                    when = datetime.datetime.strptime(xevent['dateTime'],
-                                                                                      '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M')
+                                                    # old_when = datetime.datetime.strptime(xevent['dateTime'],
+                                                    #                                  '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M%Z')
+                                                    # Note literal Z is code for
+                                                    # +0000, pg can parse that
+                                                    # already
+                                                    when = xevent['dateTime']
+                                                    # log.critical(old_when)
                                                 except (TypeError, ValueError) as e:
                                                     log.error(e)
                                                     log.error('Exchange dateTime non-existant or malformed?')
@@ -308,7 +314,8 @@ for event in events.find():
                                                                xevent['eventName'], xrunner['runnerName'],
                                                                event['bookie'],
                                                                bprice, xevent['exchangeName'],
-                                                               xmarket['marketId'], exchange_price1, exchange_size1,
+                                                               xmarket['marketId'].replace('@','.'),
+                                                               exchange_price1, exchange_size1,
                                                                exchange_price2, exchange_size2,
                                                                exchange_price3, exchange_size3,
                                                                )

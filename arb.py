@@ -1,5 +1,19 @@
 import datetime
+import pytz
 
+# ======================LOGGING
+import logging
+LOG_LEVEL = logging.DEBUG
+LOGFORMAT = "  %(log_color)s%(levelname)-8s%(reset)s | %(log_color)s%(message)s%(reset)s"
+from colorlog import ColoredFormatter
+logging.root.setLevel(LOG_LEVEL)
+formatter = ColoredFormatter(LOGFORMAT)
+stream = logging.StreamHandler()
+stream.setLevel(LOG_LEVEL)
+stream.setFormatter(formatter)
+log = logging.getLogger('pythonConfig')
+log.setLevel(LOG_LEVEL)
+log.addHandler(stream)
 
 class Arb:
 
@@ -36,7 +50,8 @@ class Arb:
         # (UTC+1:00 etc), which might make daylight savint time a headache,
         # Django will still assume this string is UTC time, so just give it UTC time.
         # then it will manage it correctly.
-        self.found_stamp = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+        # self.found_stamp = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M %z')
+        self.found_stamp = datetime.datetime.now(pytz.utc)
 
     #
     # Arb worth if matched it out, as percentage
@@ -108,7 +123,7 @@ class Arb:
             insSQLcmd += "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING Id"
             try:
                 cur.execute(insSQLcmd, values_to_insert)
-            except Exception:
+            except Exception as e:
                 log.error(e)
             # Get row id of last row this cur inserted
             # print 'ID of item inserted: %s' %  cur.lastrowid

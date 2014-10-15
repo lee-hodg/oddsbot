@@ -119,9 +119,15 @@ class FormatRunners(object):
             return marketDic
         else:
             for runner in marketDic['runners']:
-                n = runner['runnerName']
-                f = n.rsplit(' ', 1)[-1]
-                runner['runnerName'] = f
+                if runner['reverse_tag']:
+                    n = runner['runnerName']
+                    f = n.rsplit(' ', 1)[-1]
+                    scores = f.split('-')
+                    runner['runnerName'] = '-'.join(scores[::-1])
+                else:
+                    n = runner['runnerName']
+                    f = n.rsplit(' ', 1)[-1]
+                    runner['runnerName'] = f
             return marketDic
 
 class ConvertOdds(object):
