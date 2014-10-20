@@ -123,6 +123,7 @@ headers = {'X-Application': appKey, 'X-Authentication': sessionToken,
            'content-type': 'application/json', 'Accept': 'application/json'}
 
 
+log.info('BEGINING BETFAIR SCRAPE')
 # ======================= EVENT LISTING INFO
 # List number of events that match filter,
 # NB. football has eventTypeID 1. Use
@@ -309,7 +310,7 @@ for market in marketCatalogueList:
         # Format 1 - 0 as 1-0
         for runner in resRunners:
             sid = str(runner['selectionId'])
-            runners[sid] = {'runnerName': runner['runnerName'].replace(' ',''), }
+            runners[sid] = {'runnerName': runner['runnerName'].replace(' ', ''), }
     else:
         for runner in resRunners:
             sid = str(runner['selectionId'])
@@ -383,7 +384,11 @@ for event in eventsMktsList:
     event['markets'] = event['markets'].values()
     for market in event['markets']:
         market['runners'] = market['runners'].values()
+
+# Clear old and insert
+xevents.remove({'exchangeName': 'Betfair'})
 xevents_ids = xevents.insert(eventsMktsList)
+log.info('Inserted %i entries' % len(xevents_ids))
 
 # timing
 print 'Finishing forage at: \033[33m', datetime.datetime.now().strftime('%H:%M:%S'), '\033[0m'

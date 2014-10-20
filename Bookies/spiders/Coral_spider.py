@@ -8,6 +8,11 @@ take_first = TakeFirst()
 
 
 class CoralSpider(Spider):
+
+    # This is a spider specific delay which controls lower and upper limits
+    # for the range of delays that scrapy will use (0.5*x, 1.5*x)
+    download_delay = 0.9
+
     name = "Coral"
     allowed_domains = ["coral.co.uk"]
 

@@ -3,8 +3,8 @@
 from __future__ import division  # nice division
 import difflib  # for string comparison
 import unicodedata  # Normalize unicode by forcing to ascii equiv in compStr
-import datetime
-import pytz
+# import datetime
+# import pytz
 from arb import Arb
 
 # ======================LOGGING
@@ -32,21 +32,21 @@ sharedOddsLists = [['Setantabet', 'Jenningsbet', ],
 
 # if str is in dictionary of aliases replace by standard:
 # should be pickled eventually or some such.
-ALIASES = {'manchester city': ['man city', 'man.city'],
-           'manchester united': ['man united', 'man u', 'man utd',
-                                 'manchester u', 'manchester utd'],
-           'cordoba': ['cordoba cf', ],
-           'evian thonon gaillard': ['evian tg', ],
-           'paris saint germain': ['paris sg', 'paris st-g', 'paris st g',
-                                   'paris st germain', 'paris st.g',
-                                   'paris st.germain', ],
-           'qpr': ["queen's park rangers", ],
-           'atletico madrid': ['atl madrid', ],
-           'rayo vallecano': ['vallecano', ],
-           'blackburn rovers': ['blackburn', ],
-           'bayern munich': ['b munich', ],
-
-           }
+# ALIASES = {'manchester city': ['man city', 'man.city'],
+#            'manchester united': ['man united', 'man u', 'man utd',
+#                                  'manchester u', 'manchester utd'],
+#            'cordoba': ['cordoba cf', ],
+#            'evian thonon gaillard': ['evian tg', ],
+#            'paris saint germain': ['paris sg', 'paris st-g', 'paris st g',
+#                                    'paris st germain', 'paris st.g',
+#                                    'paris st.germain', ],
+#            'qpr': ["queen's park rangers", ],
+#            'atletico madrid': ['atl madrid', ],
+#            'rayo vallecano': ['vallecano', ],
+#            'blackburn rovers': ['blackburn', ],
+#            'bayern munich': ['b munich', ],
+#
+#            }
 
 # =============POSTGRES (store arbs in postgres)
 import psycopg2
@@ -69,12 +69,16 @@ with conn:
 # Now can easily insert documents with xmarket_id = xmarkets.insert(someevent)
 # (see http://api.mongodb.org/python/current/tutorial.html)
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
 client = MongoClient()
 client = MongoClient('localhost', 27017)
 db = client.oddsbot_scrapy  # connect to our db
 events = db.events  # then bookies events collection
 xevents = db.xevents  # then exchange events collection
 # arbs = db.arbs  # arbs collection
+aliases = db.aliases
+# make primaryName unqiue
+aliases.ensure_index('primaryName', unique=True)
 
 # MONGO doesn't really support joins, but its read/write generally
 # faster than postgres. It might be tempting to think sql with join
@@ -92,6 +96,43 @@ xevents = db.xevents  # then exchange events collection
 # thinks it could be a match.
 
 
+def aliasInsert(str1, str2):
+    # Test if document exists with either str1 or str2 as primaryName
+    # This should be made a unique field too somehow
+    # This should gradually speed up compStr
+
+    # ALSO NEED TO SELECT IF str1 or str2 in otherNames
+    record = aliases.find_one({'$or':
+                               [{"primaryName": {'$in': [str1, str2]}},
+                                {'otherNames': {'$in': [str1, str2]}}
+                                ]
+                               })
+    if record:
+        if record['primaryName'] == str1:
+            # Append str2 to its list if not already there
+            aliases.update(record, {'$addToSet': {'otherNames': str2}})
+        elif record['primaryName'] == str2:
+            # Append str1 to its list if not already there
+            aliases.update(record, {'$addToSet': {'otherNames': str1}})
+        elif str1 in record['otherNames']:
+            aliases.update(record, {'$addToSet': {'otherNames': str2}})
+        elif str2 in record['otherNames']:
+            aliases.update(record, {'$addToSet': {'otherNames': str1}})
+
+    else:
+        # no existing record with str1 as primary key
+        try:
+            aliases.insert({'primaryName': str1, 'otherNames': [str2, ]})
+        except DuplicateKeyError:
+            pass
+
+
+def compStrQuick(str1, str2):
+    if str1 == str2:
+        return True
+    return False
+
+
 def compStr(str1, str2):
     '''
     Decide if two teams from different books are really the same.
@@ -101,12 +142,18 @@ def compStr(str1, str2):
     # Force unicode chars to ascii equiv, e.g. accented 'a' to regular 'a'
     str1 = unicodedata.normalize('NFKD', str1).encode('ascii', 'ignore')
     str2 = unicodedata.normalize('NFKD', str2).encode('ascii', 'ignore')
-    aliases = ALIASES
-    for key in aliases:
-        if str1 in aliases[key]:
-            str1 = key
-        if str2 in aliases[key]:
-            str2 = key
+    # aliases = ALIASES
+    # for key in aliases:
+    #     if str1 in aliases[key]:
+    #         str1 = key
+    #     if str2 in aliases[key]:
+    #         str2 = key
+    # Standardise names on primaryName
+    for alias in aliases.find():
+        if str1 in alias['otherNames']:
+            str1 = alias['primaryName']
+        if str2 in alias['otherNames']:
+            str2 = alias['primaryName']
 
     # Is either simply contained in other? (e.g. man city and man city fc)
     if (str1 in str2) or (str2 in str1):
@@ -120,6 +167,9 @@ def compStr(str1, str2):
         if similarity > critVal:
                 # Write str2 to str1 key of list in mongo overtime building up
                 # lists we can maybe use to auto build alias dic
+                # If deemed the same append to mongo aliases dic
+                # to speed up things next time
+                aliasInsert(str1, str2)
                 return True
         else:
             return False
@@ -159,7 +209,11 @@ for event in events.find():
     # If you could write the compStr in js, you could further reduce subset
     # with 'team1': $where: compStr() { //stuff better than obj.team1 ==
     # event['teams][0]} etc, but this function is quite python specific
-    # Might be worth a look for speed (might be slow anyway though).
+    # Might be worth a look for speed (might be slow anyway though) as
+    # the docs note that $where with js funcs can be slow...
+    # xevents_subset = xevents.find({'team1': event['teams'][0],
+    #                               'team2': event['teams'][1]
+    #                               })
     if xevents_subset.count() == 0:
         continue
     else:
@@ -223,8 +277,8 @@ for event in events.find():
                                                     else:
                                                         exchange_size1 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange size1')
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange size1')
                                                     exchange_size1 = 0.00
 
                                                 try:
@@ -235,8 +289,8 @@ for event in events.find():
                                                     else:
                                                         exchange_size2 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange size2')
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange size2')
                                                     exchange_size2 = 0.00
 
                                                 try:
@@ -247,8 +301,8 @@ for event in events.find():
                                                     else:
                                                         exchange_size3 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange size3')
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange size3')
                                                     exchange_size3 = 0.00
 
                                                 try:
@@ -259,8 +313,8 @@ for event in events.find():
                                                     else:
                                                         exchange_price1 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange price1')
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange price1')
                                                     exchange_price1 = 0.00
 
                                                 try:
@@ -271,8 +325,8 @@ for event in events.find():
                                                     else:
                                                         exchange_price2 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange price2')
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange price2')
                                                     exchange_price2 = 0.00
 
                                                 try:
@@ -283,9 +337,9 @@ for event in events.find():
                                                     else:
                                                         exchange_price3 = 0.00
                                                 except (ValueError, IndexError) as e:
-                                                    log.error(e)
-                                                    log.error('Error when converting exchange price3')
-                                                    log.error(xrunner['availableToLay'])
+                                                    # log.error(e)
+                                                    # log.error('Error when converting exchange price3')
+                                                    # log.error(xrunner['availableToLay'])
                                                     exchange_price3 = 0.00
 
                                                 # arb = {'when': datetime.datetime.strptime(xevent['dateTime'],
@@ -314,7 +368,7 @@ for event in events.find():
                                                                xevent['eventName'], xrunner['runnerName'],
                                                                event['bookie'],
                                                                bprice, xevent['exchangeName'],
-                                                               xmarket['marketId'].replace('@','.'),
+                                                               xmarket['marketId'].replace('@', '.'),
                                                                exchange_price1, exchange_size1,
                                                                exchange_price2, exchange_size2,
                                                                exchange_price3, exchange_size3,

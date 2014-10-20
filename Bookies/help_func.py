@@ -64,6 +64,12 @@ def linkFilter(name, link):
                    'Over',
                    'Popular',
                    'Under',
+                   'special',
+                   'long-term',
+                   'wc-',
+                   'final',
+                   'group-winner',
+                   'outrights',
                    ]
 
     exceptionPhrases = []

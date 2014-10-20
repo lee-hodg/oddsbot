@@ -119,6 +119,8 @@ class FormatRunners(object):
             return marketDic
         else:
             for runner in marketDic['runners']:
+                # Replace ':' with '-'
+                runner['runnerName'] = runner['runnerName'].replace(':','-')
                 if runner['reverse_tag']:
                     n = runner['runnerName']
                     f = n.rsplit(' ', 1)[-1]
@@ -143,11 +145,12 @@ class ConvertOdds(object):
 
             # replace commas by periods
             if v:
-                v.replace(',', '.')
+                v = v.replace(',', '.')
                 try:
                     v = v.lower()
                 except AttributeError:
                     pass
+                print v
 
             if v is None or v == '':
                 final = '0.0'
