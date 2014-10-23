@@ -132,9 +132,12 @@ class FormatRunners(object):
                 r = regex.search(runner['runnerName'])
                 if r:
                     scoreDict = r.groupdict()
-                    if runner['reverse_tag']:
-                        # Reverse
-                        runner['runnerName'] = '-'.join(scoreDict.values()[::-1])
+                    if 'reverse_tag' in runner.keys():
+                        if runner['reverse_tag']:
+                            # Reverse
+                            runner['runnerName'] = '-'.join(scoreDict.values()[::-1])
+                        else:
+                            runner['runnerName'] = '-'.join(scoreDict.values())
                     else:
                         runner['runnerName'] = '-'.join(scoreDict.values())
             return marketDic

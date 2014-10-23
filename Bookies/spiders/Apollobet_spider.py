@@ -158,8 +158,6 @@ class ApollobetSpider(Spider):
         for result in CSresults:
             price = take_first(result.xpath('p[@class="oddsbigbtn"]/text()').extract())
             runnerName = take_first(result.xpath('p[2][not(@class="oddsbigbtn")]/text()').extract())
-            # log.msg('runnerName %s and price %s' % (runnerName, price), level=log.DEBUG)
-            # stop = raw_input('e2c')
             if runnerName and price:
                 if teams[1] in runnerName.lower():
                     # Tag for score reversing by loader (e.g. if Team2 1-0 want
