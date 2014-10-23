@@ -3,6 +3,7 @@ from scrapy.contrib.loader import ItemLoader
 from scrapy.contrib.loader.processor import TakeFirst, Compose, MapCompose, Identity
 import dateutil.parser
 import datetime
+import re
 
 
 # NB both input and output processors recieve iterator as first arg
@@ -29,7 +30,7 @@ def parse_str2date(dt_str):
 
         return dateutil.parser.parse(dt_str)
     except:
-        print '[ERROR parse_str2date] dt_str: %s fin.' % dt_str
+        print '[ERROR parse_str2date] dt_str: %s .' % dt_str
         return dateutil.parser.parse('')
 
 
@@ -108,6 +109,7 @@ class StripOdds(object):
 #                            'malformed price when convertOdds called \033[0m')
 #         return odic
 
+
 class FormatRunners(object):
     '''
     Convert CS runner names from
@@ -119,18 +121,24 @@ class FormatRunners(object):
             return marketDic
         else:
             for runner in marketDic['runners']:
+                # Deal with numerous formats 'Liverpool 1-0', '1-0', '1:0',
+                # 'Liverpool 1 - 0', 'Liverpool 1 : 0', 'liverpool 1:0', '(1-0)'
+                # ( 1 - 0), 'Liverpool (1-0)', 'Liverpool (1 - 0)', 'Liverpool
+                # (1 : 0)'.
                 # Replace ':' with '-'
-                runner['runnerName'] = runner['runnerName'].replace(':','-')
-                if runner['reverse_tag']:
-                    n = runner['runnerName']
-                    f = n.rsplit(' ', 1)[-1]
-                    scores = f.split('-')
-                    runner['runnerName'] = '-'.join(scores[::-1])
-                else:
-                    n = runner['runnerName']
-                    f = n.rsplit(' ', 1)[-1]
-                    runner['runnerName'] = f
+                # (slower than other methods perhaps, but deals with lots of
+                # formats)
+                regex = re.compile(r"(?P<score1>[0-9]+)\s*[\-,:]\s*(?P<score2>[0-9]+)")
+                r = regex.search(runner['runnerName'])
+                if r:
+                    scoreDict = r.groupdict()
+                    if runner['reverse_tag']:
+                        # Reverse
+                        runner['runnerName'] = '-'.join(scoreDict.values()[::-1])
+                    else:
+                        runner['runnerName'] = '-'.join(scoreDict.values())
             return marketDic
+
 
 class ConvertOdds(object):
     '''
@@ -184,6 +192,7 @@ take_first = TakeFirst()
 strip_odds = StripOdds()
 convert_odds = ConvertOdds()
 format_runners = FormatRunners()
+
 
 class EventLoader(ItemLoader):
 
