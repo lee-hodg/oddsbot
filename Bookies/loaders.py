@@ -63,6 +63,18 @@ class Strip(object):
 #         return {k: v.lower().strip() for k, v in dic.iteritems()}
 
 
+class StripMarketName(object):
+    '''
+    Strip marketName. In place change on dict passed
+    '''
+    def __call__(self, marketDic):
+        try:
+            marketDic['marketName'] = marketDic['marketName'].strip()
+        except KeyError as e:
+            print '\033[31m\033[7m [ERROR StripMarketName:] %s \033[0m' % e
+        return marketDic
+
+
 class StripOdds(object):
     '''
     Strip prices. In place change on dict passed
@@ -193,6 +205,7 @@ class ConvertOdds(object):
 # runs the call method of the class
 take_first = TakeFirst()
 strip_odds = StripOdds()
+strip_mkt_name = StripMarketName()
 convert_odds = ConvertOdds()
 format_runners = FormatRunners()
 
@@ -209,5 +222,5 @@ class EventLoader(ItemLoader):
     dateTime_in = Compose(take_first, parse_str2date, parse_date2str)
     # dateTime_out = MapCompose(parse_date2str)
 
-    markets_in = MapCompose(strip_odds, convert_odds, format_runners)
+    markets_in = MapCompose(strip_mkt_name, strip_odds, convert_odds, format_runners)
     markets_out = Identity()  # don't apply default
