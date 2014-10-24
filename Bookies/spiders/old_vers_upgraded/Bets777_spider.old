@@ -8,6 +8,8 @@ import dateutil.parser #since they use ordinal date 1st, 2nd..
 import os
 LOG_DIR = settings['LOG_DIR']
 
+# CLOSED DOWN!!!!
+
 #since no bookie will list the year,we work
 #with only month and date in the 12 -31 format
 #so we'll standardise all formatting from books as %m %d
