@@ -61,7 +61,8 @@ def xrunner():
 # First x poll and first batch of spiders
 results = xrunner()
 log.info('Now begining batch of bookies...')
-spiders = ['Coral', ]
+spiders = ['Apollobet', 'Betfred', 'BGbet', 'Buzzodds', 'Coral', 'Interwetten',
+           'Marathonbet', 'Skybet']
 for spider in spiders:
     # If passing string either shell must be True or string
     # must simply be name of progam sans args.

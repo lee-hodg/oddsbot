@@ -109,21 +109,30 @@ class BetfredSpider(Spider):
                 teams = eventName.lower().split(' v ')
                 l.add_value('teams', teams)
 
-            # Odds dict
-            odd_dict = {}
+            # Markets
+            MOdict = {'marketName': 'Match Odds'}
             oddsSelection = event.xpath('selections//selection')
+            home_price = draw_price = away_price = 0.00
             for selection in oddsSelection:
                 selType = take_first(selection.xpath('hadvalue/text()').extract())
                 odd_up = take_first(selection.xpath('currentpriceup/text()').extract())
                 odd_down = take_first(selection.xpath('currentpricedown/text()').extract())
                 if odd_up and odd_down:
                     if selType == u'H':
-                        odd_dict['odd1'] = odd_up+'/'+odd_down
+                        home_price = odd_up+'/'+odd_down
                     elif selType == u'D':
-                        odd_dict['odd3'] = odd_up+'/'+odd_down
+                        draw_price = odd_up+'/'+odd_down
                     elif selType == u'A':
-                        odd_dict['odd2'] = odd_up+'/'+odd_down
-            l.add_value('odds', odd_dict)
+                        away_price = odd_up+'/'+odd_down
+            MOdict['runners'] = [{'runnerName': 'HOME',
+                                  'price': home_price},
+                                 {'runnerName': 'DRAW',
+                                  'price': draw_price},
+                                 {'runnerName': 'AWAY',
+                                  'price': away_price},
+                                 ]
+
+            l.add_value('markets', [MOdict, ])
 
             items.append(l.load_item())
         return items
