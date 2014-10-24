@@ -21,11 +21,12 @@ def parse_str2date(dt_str):
     #     if dt_str is not None and dt_str != '':
             # dts.append(dateutil.parser.parse(dt_str))
     # return dtsa
-    dt_str = dt_str.lower()
+    # NB upper not lower so that GMT, BST work still
+    dt_str = dt_str.upper()
     try:
-        if 'today' in dt_str:
+        if 'TODAY' in dt_str:
             return datetime.datetime.now()
-        elif 'tomorrow' in dt_str:
+        elif 'TOMORROW' in dt_str:
             return datetime.datetime.now() + datetime.timedelta(days=1)
 
         return dateutil.parser.parse(dt_str)

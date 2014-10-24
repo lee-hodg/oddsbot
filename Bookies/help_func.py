@@ -75,6 +75,13 @@ def linkFilter(name, link):
                    'World Cup'
                    '2016',
                    'Capital One',
+                   'outright',
+                   'in-play',
+                   'winner',
+                   'winning-nation',
+                   'corners',
+                   'reach-the',
+                   'to-qualify'
                    ]
 
     exceptionPhrases = []
