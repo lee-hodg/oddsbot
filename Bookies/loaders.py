@@ -130,7 +130,7 @@ class FormatRunners(object):
     trying to avoid regex for speed
     '''
     def __call__(self, marketDic):
-        if marketDic['marketName'] != 'Correct Score':
+        if marketDic['marketName'].title() != 'Correct Score':
             return marketDic
         else:
             for runner in marketDic['runners']:
