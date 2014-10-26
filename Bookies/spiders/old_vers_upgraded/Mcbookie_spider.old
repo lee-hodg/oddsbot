@@ -9,6 +9,8 @@ import datetime,re
 import os
 LOG_DIR = settings['LOG_DIR']
 
+# NOTE MCBOOKIE IS JUST A BETVICTOR (I.E. B2B) SKIN, NO NEED SCRAPE BOTH
+
 today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
 
 class McbookieSpider(Spider):

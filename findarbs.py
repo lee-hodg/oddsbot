@@ -28,6 +28,7 @@ MIN_ARB_FRAC = 0.95
 MIN_BOOK_ODD = 1.00
 # List of lists grouping bookies that share odds, this saves us uneeded scraping
 sharedOddsLists = [['Setantabet', 'Jenningsbet', ],
+                   ['Betvictor', 'McBookie',]
                    ]
 
 # if str is in dictionary of aliases replace by standard:
