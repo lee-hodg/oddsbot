@@ -139,9 +139,15 @@ class BetathomeSpider(Spider):
                        'Referer': 'https://www.bet-at-home.com/en/sport',
                        }
             log.msg('Len of MOlist is %i' % len(MOlist))
-            # for link in moreLinks:
-            #     yield Request(url=base_url+link, headers=headers, dont_filter=True,
-            #                   callback=self.parseData)
+            for n, link in enumerate(moreLinks):
+                # Send the MOlist only on first
+                if n == 0:
+                    meta = {'MOlist': MOlist}
+                    yield Request(url=base_url+link, headers=headers, dont_filter=True,
+                                  meta=meta, callback=self.parseData)
+                else:
+                    yield Request(url=base_url+link, headers=headers, dont_filter=True,
+                                  callback=self.parseData)
 
     def parseData(self, response):
         log.msg('Going to parse data for URL: %s' % response.url[20:],
@@ -209,4 +215,15 @@ class BetathomeSpider(Spider):
         l.add_value('markets', allmktdicts)
 
         # Load item
-        return l.load_item()
+        # If MOlist (MO only event items) in list load it too
+        # This list should only be present once!
+        try:
+            MOlist = response.meta['MOlist']
+        except KeyError:
+            MOlist = None
+        if MOlist:
+            log.msg('MOlist recieved appended item to it')
+            MOlist.append(l.load_item())
+            return MOlist
+        else:
+            return l.load_item()
