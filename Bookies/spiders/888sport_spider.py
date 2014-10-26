@@ -9,7 +9,8 @@ import json
 take_first = TakeFirst()
 
 #
-# Just like unibet 888 uses Kambi api.
+# Just like unibet, 32red, paf, iveriabet, 888 uses Kambi api.
+# No point scraping all, just do 888 (see https://kambi.com/contact/)
 # Page load loads 'Kambi betting client'
 # , which is a swf. But we can still replicate
 # its requests to API to get the raw JSON data.
