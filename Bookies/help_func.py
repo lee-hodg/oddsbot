@@ -54,7 +54,7 @@ def linkFilter(name, link):
                    'To Qualify',
                    'Correct Score Crazy',
                    '0-0 Cashback Offer',
-                   'Elite European Leagues',  # will get these via European Coupons
+                   'Elite European Leagues',
                    'European Championships',
                    'Specials',
                    'Outright',
@@ -72,7 +72,7 @@ def linkFilter(name, link):
                    'outrights',
                    'Live',
                    'What If',
-                   'World Cup'
+                   'World Cup',
                    '2016',
                    'Capital One',
                    'outright',
@@ -81,7 +81,22 @@ def linkFilter(name, link):
                    'winning-nation',
                    'corners',
                    'reach-the',
-                   'to-qualify'
+                   'to-qualify',
+                   'Winner',
+                   'Top',
+                   'Finishing',
+                   'Special',
+                   'Relegated',
+                   'Overall',
+                   'overall-winner',
+                   'group-winner',
+                   'final-participants',
+                   'group',
+                   'winners-nation',
+                   'first-time-winner',
+                   'qualification-group',
+                   'group-',
+                   'top-goal-scorer',
                    ]
 
     exceptionPhrases = []
