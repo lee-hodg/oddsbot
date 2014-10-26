@@ -11,6 +11,49 @@ import json
 take_first = TakeFirst()
 
 
+def createMOonly(event, response, bookieName):
+    '''
+    Take event selection, parse dateTime, teams
+    , MO prices then return event loaded.
+    (Remember to load item one of the parse methods of spider class
+    must return it, but this would terminate current chain, so we pass
+    it along in a list, this function just create the item for appending
+    to that list)
+    '''
+
+    teams = []
+    eventName = take_first(event.xpath('td[1]/text()').extract())
+    if eventName:
+        teams = eventName.lower().split(' - ')
+    dateTime = take_first(event.xpath('td[2]/text()').extract())
+    home_price = take_first(event.xpath('td[3]/a/text()').extract())
+    draw_price = take_first(event.xpath('td[4]/a/text()').extract())
+    away_price = take_first(event.xpath('td[5]/a/text()').extract())
+    mDict = {'marketName': 'Match Odds',
+             'runners': [{'runnerName': 'HOME',
+                         'price': home_price},
+                         {'runnerName': 'DRAW',
+                         'price': draw_price},
+                         {'runnerName': 'AWAY',
+                         'price': away_price}
+                         ]
+             }
+    # Load the MO data
+    l = EventLoader(item=EventItem2(), response=response)
+    l.add_value('sport', u'Football')
+    l.add_value('bookie', bookieName)
+    l.add_value('dateTime', dateTime)
+    l.add_value('teams', teams)
+    l.add_value('markets', [mDict, ])
+    # Debug
+    log.msg('No more link for %s, load MO prices only' % eventName, level=log.DEBUG)
+    log.msg('Datetime: %s' % dateTime, level=log.DEBUG)
+    log.msg('Teams %s' % teams, level=log.DEBUG)
+    log.msg('mDict: %s' % mDict, level=log.DEBUG)
+    # Return loaded item
+    return l.load_item()
+
+
 class BetathomeSpider(Spider):
     name = "Betathome"
 
@@ -38,7 +81,8 @@ class BetathomeSpider(Spider):
         Grab more links from page, add to dictionary passed with meta
         then jump to next page recursively calling back here to grab more moreLinks
         until no more next page, then finally iterate over the accumulated links
-        sending each to parseData
+        sending each to parseData. Some events have no more link for these just
+        grab MO data and pass item along in the meta to return at end.
         '''
 
         # First the moreLinks from this page
@@ -64,39 +108,9 @@ class BetathomeSpider(Spider):
                 moreLinks += moreLink
             else:
                 # parse MO only data here
-                teams = []
-                eventName = take_first(event.xpath('td[1]/text()').extract())
-                if eventName:
-                    teams = eventName.lower().split(' - ')
-                dateTime = take_first(event.xpath('td[2]/text()').extract())
-                home_price = take_first(event.xpath('td[3]/a/text()').extract())
-                draw_price = take_first(event.xpath('td[4]/a/text()').extract())
-                away_price = take_first(event.xpath('td[5]/a/text()').extract())
-                mDict = {'marketName': 'Match Odds',
-                         'runners': [{'runnerName': 'HOME',
-                                      'price': home_price},
-                                     {'runnerName': 'DRAW',
-                                      'price': draw_price},
-                                     {'runnerName': 'AWAY',
-                                      'price': away_price}
-                                     ]
-                         }
-                # load the MO data
-                l = EventLoader(item=EventItem2(), response=response)
-                l.add_value('sport', u'Football')
-                l.add_value('bookie', self.name)
-                l.add_value('dateTime', dateTime)
-                l.add_value('teams', teams)
-                l.add_value('markets', [mDict, ])
-                # Load item
-                MOlist.append(l.load_item())
-                log.msg('No more link for %s, load MO prices here' % eventName)
-                log.msg('Datetime: %s' % dateTime)
-                log.msg('Teams %s' % teams)
-                log.msg('mDict: %s' % mDict)
+                MOlist.append(createMOonly(event, response, self.name))
 
-                # stop = raw_input('e2c')
-        # moreLinks += sel.xpath('//table/tbody/tr/'
+        # allMoreLinks += sel.xpath('//table/tbody/tr/'
         #                       'td[starts-with(@class, "ods-tbody-td ods-odd-additional")]/'
         #                       'a/@href').extract()
         # eventNames = sel.xpath('//table/tbody/tr/'
@@ -219,11 +233,10 @@ class BetathomeSpider(Spider):
         # This list should only be present once!
         try:
             MOlist = response.meta['MOlist']
-        except KeyError:
-            MOlist = None
-        if MOlist:
             log.msg('MOlist recieved appended item to it')
-            MOlist.append(l.load_item())
+            MOlist.append(l.load_item())  # in-place change
             return MOlist
-        else:
-            return l.load_item()
+        except KeyError:
+            pass
+        # Return just the detailed item
+        return l.load_item()
