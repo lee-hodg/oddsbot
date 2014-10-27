@@ -31,6 +31,14 @@ USER_AGENT_LIST=["Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/201001
 		"Mozilla/5.0 (X11; CrOS i686 3912.101.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.116 Safari/537.36",
 		"Mozilla/5.0 (Windows; U; Windows NT 5.1; pt-BR) AppleWebKit/534.8 (KHTML, like Gecko) Navscape/Pre-0.2 Safari/534.8",
 		"Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)"]
+
+MOBILE_USER_AGENT_LIST = ["Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A341 Safari/528.16",
+                          ]
+
+# Put spider name here to have rotate user agent middleware choose from mobile
+# user agent list
+MOBILE_SPIDERS = []
+
 #Note (see DOWNLOADER_MIDDLEWARES_BASE, middle ware is number 400. Num determines order of exec)
 DOWNLOADER_MIDDLEWARES = {
  'Bookies.random_user_agent.RandomUserAgentMiddleware': 400,                     #use custom (at 400 number like normal)
