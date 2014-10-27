@@ -7,6 +7,7 @@ from scrapy import log
 from scrapy.http import Request
 import time
 import json
+import re
 take_first = TakeFirst()
 
 
@@ -20,13 +21,6 @@ class NordicbetSpider(Spider):
                       callback=self.allfoot
                       )
 
-    # def pre_parse_leagues(self, response):
-    #     # Make request to get page with leagues
-    #     url = ('https://www.nordicbet.com/sportsbook_filter?'
-    #            'use_mouseover=True&cmd=get_categories&category_id=50000000001')
-    #     headers = {'Referer': 'https://www.nordicbet.com/eng/sportsbook'}
-    #     yield Request(url=url, callback=self.parse_leagues)
-
     def allfoot(self, response):
         '''
         Request paginated page with all football links
@@ -36,7 +30,8 @@ class NordicbetSpider(Spider):
         # ms since unix epoch stamp
         stamp = int(time.time()*1000)
         base_url = 'https://www.nordicbet.com/eng/sportsbook'
-        GETstr = '?cmd=chooseInAjax&category_id=50000000001&source=15&sidebet_type=1x2&view_more_bets=true&_=%s' % stamp
+        GETstr = ('?cmd=chooseInAjax&category_id=50000000001&source=15&'
+                  'sidebet_type=1x2&view_more_bets=true&_=%s' % stamp)
         headers = {'Host': 'www.nordicbet.com',
                    'Referer': 'https://www.nordicbet.com/eng/sportsbook',
                    'X-Requested-With': 'XMLHttpRequest'
@@ -45,12 +40,11 @@ class NordicbetSpider(Spider):
                       callback=self.pageSport)
 
     def pageSport(self, response):
-
-        # First the moreLinks (eIds) from this page
-        # try:
-        #     eIds = response.meta['eIds']
-        # except KeyError:
-        #     eIds = []
+        '''
+        Get the pagination data then
+        iterate over all the pages requesting
+        the football 1x2 events list for each
+        '''
 
         # Now the next page if it exists
         try:
@@ -61,11 +55,6 @@ class NordicbetSpider(Spider):
             # Only paging data with first hit
             pass
 
-        # nextPageEl = take_first(selPage.xpath('//div[starts-with(@class,'
-        #                                       ' "next page-arrow-common page-arrow-next-default")'
-        #                                       '  and not(@style="display: none;")]'
-        #                                       )
-        #                         )
         # Get all paging info first hit and iterate over pages rather than recursive
         pages = selPage.xpath('//span[starts-with(@class, "page-number-common")]')
         for page in pages:
@@ -89,13 +78,19 @@ class NordicbetSpider(Spider):
                        'X-Requested-With': 'XMLHttpRequest',
                        }
             log.msg('The nextPage is: %s of %s' % (nextPage, int(pcount)))
-            log.msg('GETstr for page %s is %s' % (GETstr, int(nextPage)))
+            # log.msg('GETstr for page %s is %s' % (GETstr, int(nextPage)))
             # stop = raw_input('e2c')
             yield Request(url=base_url+GETstr, headers=headers, dont_filter=True,
                           meta={'page': nextPage},
                           callback=self.parse_events)
 
     def parse_events(self, response):
+        '''
+        Loop over all events. If no moreLink
+        just yield the match odds data, if moreLink
+        pass the MO data in meta and then request other markets
+        data, finally adding all mkts in parseData
+        '''
 
         pageNum = response.meta['page']
         log.msg('Parsing events for page: %s' % pageNum)
@@ -173,14 +168,15 @@ class NordicbetSpider(Spider):
                 l.add_value('markets', [mDict, ])
                 # Debug
                 log.msg('No moreLink for %s, load MO prices only' % eventName, level=log.DEBUG)
-                log.msg('Datetime: %s' % dateTime, level=log.DEBUG)
-                log.msg('Teams %s' % teams, level=log.DEBUG)
-                log.msg('mDict: %s' % mDict, level=log.DEBUG)
+                # log.msg('Datetime: %s' % dateTime, level=log.DEBUG)
+                # log.msg('Teams %s' % teams, level=log.DEBUG)
+                # log.msg('mDict: %s' % mDict, level=log.DEBUG)
                 # Return loaded item
                 # stop = raw_input('e2c')
                 yield l.load_item()
 
     def parseData(self, response):
+
         log.msg('Going to parse data for URL: %s' % response.url[20:],
                 level=log.INFO)
 
@@ -195,31 +191,62 @@ class NordicbetSpider(Spider):
         l.add_value('teams', teams)
 
         # Markets
-        mkts = response.xpath('//table[starts-with(@class, "resultstbl")]')
-        allmktdicts = [response.meta['mDict'], ]
-        for mkt in mkts:
-            marketName = take_first(mkt.xpath('tr[1]/td[1]/div/text()').extract())
-            mDict = {'marketName': marketName, 'runners': []}
+        # There is not enough regularity for one-size-fits-all but could we
+        # at least grab markets in groups sharing similar formatting (CS and
+        # HT/FT for example)
+        mktBlocks = response.xpath('//table[starts-with(@class, "resultstbl")]')
+        allmktdicts = [response.meta['mDict'], ]  # Add in MO from meta
+        underover_re = re.compile("Under/over: (?P<val>\d+\.\d+)")
+        for mktBlock in mktBlocks:
+            blockName = take_first(mktBlock.xpath('tr[1]/td[1]/div/text()').extract())
 
-            # There is no enough regularity for one-size-fits-all but could we
-            # at least grab markets in groups (e.g. get under/over, get
-            # handicap, get exact score,get ht/ft?
-
-            # For example let's try and get something generic for Under/over
-            if 'Under/over' in marketName:
-                runners = mkt.xpath()  # not sure yet
-                for runner in runners:
-                    runnerName = take_first(runner.xpath('td[@class="label"]/text()').extract())
-                    uprice = take_first(runner.xpath('td[@class="bet"]//div[@class="odds_middle"]/text()').extract())
-                    oprice = take_first(runner.xpath('td[@class="bet last"]//div[@class="odds_middle"]/text()').extract())
-                    mDict['runners'].append([{'runnerName': runnerName+'(-)',
+            if 'Under/over' in blockName:
+                # Things are tricky because 'Under/over' or 'Under/over team'
+                # is the grouping, but the marketName should actually be the row
+                # label, i.e. 'Under/over 0.5', with runners 'Under 0.5', 'Over
+                # 0.5'
+                rows = mktBlock.xpath('tr[re:test(@class, "item$")]')
+                for row in rows:
+                    marketName = take_first(row.xpath('td[@class="label"]/div/text()').extract())
+                    # If Under/over teams
+                    if 'team' in blockName:
+                        team = take_first(row.xpath('td[@align="left"]/text()').extract())
+                        marketName = team+marketName
+                    mDict = {'marketName': marketName, 'runners': []}
+                    # Get the numeric over/under value
+                    r = underover_re.search(marketName)
+                    underover_val = r.groupdict()['val']
+                    # Prices
+                    uprice = take_first(row.xpath('td[@class="bet"]//div[@class="odds_middle"]/text()').extract())
+                    oprice = take_first(row.xpath('td[@class="bet last"]//div[@class="odds_middle"]/text()').extract())
+                    mDict['runners'].extend([{'runnerName': 'Under %s' % underover_val,
                                               'price': str(uprice),
                                               },
-                                             {'runnerName': runnerName+'(+)',
+                                             {'runnerName': 'Over %s' % underover_val,
                                               'price': str(oprice)
                                               }
                                              ])
-            allmktdicts.append(mDict)
+                    allmktdicts.append(mDict)
+
+                if 'Exact score' == blockName or 'Halftime/fulltime' == blockName:
+                    # N.B. Even half-time exact score different format!
+                    if 'Exact score' == blockName:
+                        marketName = 'Correct Score'
+                    elif 'Halftime/fulltime' == blockName:
+                        marketName = 'Halftime/Fulltime'
+                    mDict = {'marketName': marketName, 'runners': []}
+                    runners = mktBlock.xpath('tr[re:test(@class, "item$")]/'
+                                             'td[@class="exact_result"]/'
+                                             'table/tr/td[@align="center"]/'
+                                             'table')
+                    for runner in runners:
+                        runnerName = take_first(runner.xpath('td[1]/text()').extract())
+                        price = take_first(runner.xpath('td[2]//div[@class="odds_middle"]/'
+                                                        'text()').extract())
+                        mDict['runners'].append({'runnerName': runnerName,
+                                                 'price': price})
+
+                    allmktdicts.append(mDict)
 
         # # Add markets
         l.add_value('markets', allmktdicts)

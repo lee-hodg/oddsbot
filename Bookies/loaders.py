@@ -176,7 +176,8 @@ class ConvertOdds(object):
                     pass
                 print v
 
-            if v is None or v == '':
+            if v is None or v == '' or v == 'none':
+                # 'none' occurs if v = None then str(v.lower())
                 final = '0.0'
             elif v in self.evens_aliases:
                 final = '2.0'
