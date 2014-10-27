@@ -12,6 +12,7 @@ LOG_DIR = settings['LOG_DIR']
 import dateutil.parser
 import math
 
+# NO LONGER OFFER SPORTSBOOK (ASKED LIVECHAT AND NO PLANS TO REOPEN)
 # %m %d, we will standardise bookie formating like that.
 today = datetime.datetime.now()
 

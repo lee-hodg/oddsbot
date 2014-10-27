@@ -9,6 +9,8 @@ import datetime,re
 import os
 LOG_DIR = settings['LOG_DIR']
 
+# SHARES ODDS WITH NORDICBET THEREFORE ONLY SCRAPE NORDICBET
+
 today = datetime.datetime.now() #datetime obj will need str later with .strftime('%m %d')
 
 

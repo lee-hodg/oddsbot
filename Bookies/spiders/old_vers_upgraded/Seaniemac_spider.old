@@ -8,6 +8,9 @@ import dateutil.parser #since they use ordinal date 1st, 2nd..
 import os
 LOG_DIR = settings['LOG_DIR']
 
+# Owned and with same odds as boylesports
+# who also own Apollobet
+
 #%m %d, we will standardise bookie formating like that.
 today = datetime.datetime.now()
 

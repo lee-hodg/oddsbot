@@ -27,10 +27,22 @@ MIN_ARB_FRAC = 0.95
 # The min odd at bookmaker to keep.
 MIN_BOOK_ODD = 1.00
 # List of lists grouping bookies that share odds, this saves us uneeded scraping
+# N.B. Dhoze, Betsson, Betsafe are linked and sim websites, but odds seem to be
+# diff (indeed I think there is even a connection between them and Trio/Nordic)
+# N.B. Guts also part of teambet group but odds are different...(I think with
+# Oddsmatrix Bookies can just add the solution into their own lines and modify
+# bets, but others seem to rely excusively (or heavily on matrx)
 sharedOddsLists = [['Setantabet', 'Jenningsbet', ],
-                   ['Betvictor', 'McBookie', ]
-                   ['sport888', 'Unibet', 'Paf', '32RedSport', 'iveriabet', ]
+                   ['Betvictor', 'McBookie', ],
+                   ['sport888', 'Unibet', 'Paf', '32RedSport', 'iveriabet', ],
+                   ['Stanjames', 'Betpack', ],
+                   ['Nordicbet', 'Triobet', ],
+                   ['Whitebet', 'Redbet', ],
+                   ['Titanbet', 'Betvernons', ],
+                   ['Apollobet', 'Seaniemac', 'Boylesports', ],
+                   ['Teambet', 'Betredkings', 'Jetbull', 'Bestbet', ],
                    ]
+
 # if str is in dictionary of aliases replace by standard:
 # should be pickled eventually or some such.
 # ALIASES = {'manchester city': ['man city', 'man.city'],

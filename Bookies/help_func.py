@@ -97,6 +97,12 @@ def linkFilter(name, link):
                    'qualification-group',
                    'group-',
                    'top-goal-scorer',
+                   'Outrights',
+                   'To progress',
+                   'Fantasy Matches',
+                   'Matches',
+                   'Club specials',
+                   'Veikkausliiga Season Bets',
                    ]
 
     exceptionPhrases = []
