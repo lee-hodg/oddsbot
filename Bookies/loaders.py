@@ -84,7 +84,7 @@ class StripOdds(object):
         try:
             for runner in marketDic['runners']:
                 if runner['price']:
-                    runner['price'] = runner['price'].strip()
+                    runner['price'] = str(runner['price']).strip()
         except KeyError as e:
             print '\033[31m\033[7m [ERROR StripOdds:] %s \033[0m' % e
 
@@ -164,7 +164,7 @@ class ConvertOdds(object):
 
     def __call__(self, marketDic):
         for runner in marketDic['runners']:
-            v = runner['price']
+            v = str(runner['price'])
             final = '0.0'
 
             # replace commas by periods
