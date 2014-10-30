@@ -123,3 +123,8 @@ class BetsafeSpider(Spider):
    
         return items
         
+:q
+
+:q
+
+
