@@ -121,3 +121,27 @@ def linkFilter(name, link):
             return True
 
     return False  # don't filter rest
+
+
+def am2dec(odd):
+    '''
+    Convert US odds to Decimal style.
+    '''
+    if odd in ['EV', 'ev', 'even', 'evens']:
+        return odd
+
+    try:
+        odd = float(odd)
+    except ValueError:
+        return -1
+    # retrun formatted 2d
+    if odd <= -100:
+        return "%0.2f" % (1-(100/odd))
+    else:
+        return "%0.2f" % (1+(odd/100))
+
+def chunks(l, n):
+    """ Yield successive n-sized chunks from l.
+    """
+    for i in xrange(0, len(l), n):
+        yield l[i:i+n]
