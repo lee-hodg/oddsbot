@@ -103,6 +103,8 @@ def linkFilter(name, link):
                    'Matches',
                    'Club specials',
                    'Veikkausliiga Season Bets',
+                   'Winner',
+                   'Top',
                    ]
 
     exceptionPhrases = []
