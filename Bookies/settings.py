@@ -37,7 +37,7 @@ MOBILE_USER_AGENT_LIST = ["Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS
 
 # Put spider name here to have rotate user agent middleware choose from mobile
 # user agent list
-MOBILE_SPIDERS = []
+MOBILE_SPIDERS = ['Betinternet', ]
 
 #Note (see DOWNLOADER_MIDDLEWARES_BASE, middle ware is number 400. Num determines order of exec)
 DOWNLOADER_MIDDLEWARES = {
