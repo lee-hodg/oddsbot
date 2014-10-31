@@ -105,6 +105,9 @@ def linkFilter(name, link):
                    'Veikkausliiga Season Bets',
                    'Winner',
                    'Top',
+                   'Betclic',
+                   'Enhanced Odds',
+                   'Special',
                    ]
 
     exceptionPhrases = []
