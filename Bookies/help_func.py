@@ -119,6 +119,18 @@ def linkFilter(name, link):
                    'my-matches',
                    'football-outrights',
                    'football-specials',
+                   'multiple',
+                   'specials',
+                   'forecast',
+                   'finalist',
+                   'totals',
+                   'elimination',
+                   'awards',
+                   'highest',
+                   'top',
+                   'world-cup-2014/groups',
+                   'winner',
+                   'fastest-goal',
                    ]
 
     exceptionPhrases = []
