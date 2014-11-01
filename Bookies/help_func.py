@@ -108,6 +108,17 @@ def linkFilter(name, link):
                    'Betclic',
                    'Enhanced Odds',
                    'Special',
+                   'Specials',
+                   'Outright',
+                   'top-matches',
+                   'action=go_fb',
+                   'acca-bonus',
+                   'uk-both-teams-to-score',
+                   'today-and-tomorrow',
+                   'win-draw-win-both-teams-to-score',
+                   'my-matches',
+                   'football-outrights',
+                   'football-specials',
                    ]
 
     exceptionPhrases = []
