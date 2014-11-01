@@ -4,13 +4,14 @@ from scrapy.contrib.loader.processor import TakeFirst, Compose, MapCompose, Iden
 import dateutil.parser
 import datetime
 import re
+import locale
 
 
 # NB both input and output processors recieve iterator as first arg
 # output can be anything. Result appended to internal list for that field
 # alt Subclass the itemloader for different date formatting classes you
 # encounter
-def parse_str2date(dt_str):
+def parse_str2date(dt_str, loader_context):
     # parse datetime obj
     # could use loader context to specify locale
     # for foreign datestr see
@@ -23,13 +24,27 @@ def parse_str2date(dt_str):
     # return dtsa
     # NB upper not lower so that GMT, BST work still
     dt_str = dt_str.upper()
+    spider_locale = loader_context.get('spider_locale', None)
+
     try:
         if 'TODAY' in dt_str:
             return datetime.datetime.now()
         elif 'TOMORROW' in dt_str:
             return datetime.datetime.now() + datetime.timedelta(days=1)
-
-        return dateutil.parser.parse(dt_str)
+        if spider_locale:
+            # Set the locale, and use standard datetime module
+            # This works with %d %b or %d %B format dates only.
+            old_loc = locale.getlocale(locale.LC_TIME)
+            locale.setlocale(locale.LC_ALL, spider_locale)  # e.g. 'es_ES.utf8': Spanish
+            try:
+                date = datetime.datetime.strptime(dt_str, '%d %b').strftime('%m %d')
+            except ValueError:
+                date = datetime.datetime.strptime(dt_str, '%d %B').strftime('%m %d')
+            locale.setlocale(locale.LC_TIME, old_loc)  # Set back locale
+            return date
+        else:
+            # dateutil takes care of all english dates.
+            return dateutil.parser.parse(dt_str)
     except:
         print '[ERROR parse_str2date] dt_str: %s .' % dt_str
         return dateutil.parser.parse('')
@@ -70,7 +85,8 @@ class StripMarketName(object):
     '''
     def __call__(self, marketDic):
         try:
-            marketDic['marketName'] = marketDic['marketName'].strip()
+            if marketDic['marketName']:
+                marketDic['marketName'] = marketDic['marketName'].strip()
         except KeyError as e:
             print '\033[31m\033[7m [ERROR StripMarketName:] %s \033[0m' % e
         return marketDic

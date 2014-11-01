@@ -143,8 +143,38 @@ def am2dec(odd):
     else:
         return "%0.2f" % (1+(odd/100))
 
+
 def chunks(l, n):
     """ Yield successive n-sized chunks from l.
     """
     for i in xrange(0, len(l), n):
         yield l[i:i+n]
+
+
+import math
+
+
+def getOddsRounded(odds):
+
+    '''
+    This appears to be the function used by Setantabet
+    to round the odds before doing the standard am2dec conv.
+    I found this function by examing the DOM in firebug (note
+    you can right-click func on rhs and copy and paste in a js
+    beautifier without having to dig around all the js files)
+    I ultimately grabbed it from chrome dev, as firebug was playing up
+    : enter the console and type window to get the equiv of dom then do a search
+    . Function names of interest: decimalOddsToAmerican, getOddsFromAmerican,
+    getOddsFromAmericanToEU, hongKongToDecimal, getOddsRounded...chrome say this
+    in global.js
+    '''
+    if math.fabs(odds) < 600:
+        outOdds = int(round(odds/5)) * 5
+        if outOdds == -100:
+            return 100
+        else:
+            return outOdds
+    elif (odds > -1000 and odds < 0):
+        return math.floor(odds / 5) * 5
+    else:
+        return math.floor(odds / 25) * 25
