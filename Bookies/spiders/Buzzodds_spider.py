@@ -72,11 +72,14 @@ class BuzzoddsSpider(Spider):
                    'Accept:': 'Accept: application/json, text/javascript, */*; q=0.01',
                    'X-Requested-With': 'XMLHttpRequest'}
 
-        for league in leagues.keys():
-            GETstr = '?id=%s&isLive=2&startsWithin=0' % leagues[league]
-            yield Request(url=base_url+GETstr, headers=headers, callback=self.pre_parse_Data)
+        for lname, leagueId in leagues.items():
+            GETstr = '?id=%s&isLive=2&startsWithin=0' % leagueId
+            yield Request(url=base_url+GETstr, headers=headers,
+                          meta={'lname': lname}, callback=self.pre_parse_Data)
 
     def pre_parse_Data(self, response):
+
+        league_name = response.meta['lname']
 
         jResp = json.loads(response.body)
         jsonEventsData = jResp['response']
@@ -90,21 +93,39 @@ class BuzzoddsSpider(Spider):
         # GET BpEventId
         for event in jsonEventsData:
             BpEventId = event['BpEventId']
-            GETstr = '?id=%s&isLive=0' % BpEventId
-            yield Request(url=base_url+GETstr, headers=headers, callback=self.parse_Data)
+            isLive = str(event['isLive'])
+            GETstr = '?id=%s&isLive=%s' % (BpEventId, isLive)
+            yield Request(url=base_url+GETstr, headers=headers,
+                          meta={'league_name': league_name, 'BpEventId': BpEventId},
+                          callback=self.parse_Data)
 
     def parse_Data(self, response):
-        log.msg('Parsing data for url %s' % response.url, level=log.INFO)
 
+        league_name = response.meta['league_name']
+        BpEventId = response.meta['BpEventId']
+
+        log.msg('Parsing data for url %s' % response.url)
+        log.msg('Parsing for league %s and event Id %s' % (league_name, BpEventId))
         jResp = json.loads(response.body)
-        jData = jResp['response']
+        try:
+            jData = jResp['response']
+        except (TypeError, KeyError):
+            jData = jResp['error']
+            log.msg('Error response for %s and event Id %s' % (league_name, BpEventId),
+                    level=log.ERROR)
+            log.msg('Error response: %s' % jData, level=log.ERROR)
 
         l = EventLoader(item=EventItem2(), response=response)
         l.add_value('sport', u'Football')
         l.add_value('bookie', self.name)
 
-        dateTime = jData['StartTimeUTC']
-        l.add_value('dateTime', dateTime)
+        try:
+            dateTime = jData['StartTimeUTC']
+            l.add_value('dateTime', dateTime)
+        except (TypeError, KeyError):
+            log.msg('KeyError jData dump is: %s\n KeyError for %s and event Id %s'
+                    % (jData, league_name, BpEventId), level=log.ERROR)
+            return []
 
         eventName = jData['name']
         if eventName:
