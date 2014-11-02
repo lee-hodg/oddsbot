@@ -8,6 +8,7 @@ import time
 import json
 LOG_DIR = settings['LOG_DIR']
 
+# NO LNGER SUPPORTS UK BETS
 # c.f. Teambet, Jetbull, Betredkings, GUTs group
 
 # %m %d, we will standardise bookie formating like that.

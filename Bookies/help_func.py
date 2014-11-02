@@ -131,6 +131,7 @@ def linkFilter(name, link):
                    'world-cup-2014/groups',
                    'winner',
                    'fastest-goal',
+                   'Multi Match',
                    ]
 
     exceptionPhrases = []
