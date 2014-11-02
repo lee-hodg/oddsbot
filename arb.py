@@ -27,7 +27,7 @@ class Arb:
     def __init__(self, when, sport, market_type, competition, name,
                  bet_on, bookie, bookie_price, exchange, mid, exchange_price1,
                  exchange_stake1, exchange_price2, exchange_stake2,
-                 exchange_stake3, exchange_price3):
+                 exchange_price3, exchange_stake3):
         self.when = when
         self.sport = sport
         self.market_type = market_type

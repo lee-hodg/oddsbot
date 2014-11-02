@@ -1,8 +1,10 @@
 # #!/usr/bin/env python
+# Django and oddsbot
+from scrapy.conf import settings
+import sys
 import os
-# import sys
-# sys.path.append("/srv/oddsbot")
-os.environ['PYTHONPATH'] = '/srv/oddsbot'
+sys.path.insert(1, settings['ODDSBOT_DIR'])
+sys.path.insert(1, settings['ODDSBOT_ENV'])
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "oddsbot.settings")
 
 from arbs.models import Arb
