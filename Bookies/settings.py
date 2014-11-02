@@ -6,6 +6,10 @@
 #     http://doc.scrapy.org/en/latest/topics/settings.html
 #
 
+# Some spiders (Oddsring) need your IP in cookie set by js.
+# For now just set this statically.
+MY_IP = '94.193.170.143'
+
 BOT_NAME = 'Bookies'
 
 SPIDER_MODULES = ['Bookies.spiders']
