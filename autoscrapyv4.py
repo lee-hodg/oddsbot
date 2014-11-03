@@ -103,7 +103,7 @@ def setup_crawler(spider, stop=False):
 def processBatch(spiderNames, last_batch=False):
     # First x poll and first batch of spiders
     log2.info('Now begining batch of bookies \n %s.' % (', '.join(spiderNames)))
-    results = xrunner()
+    # results = xrunner()
     # Setup the spiders for this batch
     for n, spiderName in enumerate(spiderNames):
         log2.info('Seting up crawler for bookie %s' % spiderName)
@@ -135,4 +135,10 @@ processBatch(spiderNames, last_batch=True)
 
 # Start the twisted reactor, this will be shutdown by the last spider_close
 # signal of the last batch of spiders
+# It can only be run once and not restarted (it listens on loop). Use deferred
+# to release flow etc.
+# Keep in mind the above isn't happening in seq exactly, these starts
+# would just all run in parallel if let go at once. You need to start so many
+# stop them on spider close, then use deferred to callback to launch the next
+# back (or something like that).
 reactor.run()

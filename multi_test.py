@@ -13,12 +13,18 @@ def setup_crawler(spider):
     crawler = Crawler(settings)
     crawler.configure()
     crawler.crawl(spider)
-    crawler.start()
+    return crawler
 
 spider1 = CoralSpider()
 spider2 = BGbetSpider()
 spider3 = ApollobetSpider()
-setup_crawler(spider1)
-setup_crawler(spider3)
+c1 = setup_crawler(spider1)
 log.start()
+print 'setup1'
+print 'reactor.run()'
+c1.start()
+setup_crawler(spider3)
+print 'setup3'
+
+# This is event loop handler, cannot be restarted (should only be ran once)
 reactor.run()

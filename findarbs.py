@@ -425,79 +425,80 @@ for event in events.find():
 
 # print 'Pk insert list: %s' % pk_list
 
-# ###############Do some email alerts for arbs found ##########################
+if pk_list:
+    # ###############Do some email alerts for arbs found ##########################
 
-# For all premium members, loop over their savedsearches, then e-mail them
-# if any arbs are found in the database matching.
-
-
-from django.utils.http import urlencode
-from django.forms.models import model_to_dict
+    # For all premium members, loop over their savedsearches, then e-mail them
+    # if any arbs are found in the database matching.
 
 
-def savedsearch2querystr(ss):
-    '''
-    Takes a SavedSearch object and
-    converts it into a GET str
-    '''
-    # GETstr = '&'.join('{}={}'.format(k,v) for k,v in model_to_dict(ss).items())
-    mydict = model_to_dict(ss)
-    # Remove unwanted keys
-    if 'id' in mydict.keys():
-        del mydict['id']
-    if 'userprof' in mydict.keys():
-        del mydict['userprof']
-    # Generate URL encoded GET string from dict.
-    GETstr = urlencode(mydict)
-    return GETstr
+    from django.utils.http import urlencode
+    from django.forms.models import model_to_dict
 
 
-# Premium members
-from accounts.models import UserProfile
-all_profiles = UserProfile.objects.all()
-prem_profiles = []
-for prof in all_profiles:
-    if u'Premium' in [group.name for group in prof.user.groups.all()]:
-        if prof.user.is_active:
-            prem_profiles.append(prof)
+    def savedsearch2querystr(ss):
+        '''
+        Takes a SavedSearch object and
+        converts it into a GET str
+        '''
+        # GETstr = '&'.join('{}={}'.format(k,v) for k,v in model_to_dict(ss).items())
+        mydict = model_to_dict(ss)
+        # Remove unwanted keys
+        if 'id' in mydict.keys():
+            del mydict['id']
+        if 'userprof' in mydict.keys():
+            del mydict['userprof']
+        # Generate URL encoded GET string from dict.
+        GETstr = urlencode(mydict)
+        return GETstr
 
-# Send emails
-from email_alerts import filterArbs
-from django.core.mail import send_mail
-# sender = 'webmaster@oddsbot.co.uk'
-sender = 'lee@localhost'
-for prof in prem_profiles:
-    recipients = ['lee@localhost']  # [prof.user.email]  # ['leehodg@gmail.com']
-    for ss in prof.savedsearches.all():
-        # loop over saved searches for this member
-        # over recently found arbs in pk_list
-        arbs_list = filterArbs(prof.user, savedsearch2querystr(ss), pk_list)
-        print 'Number of arb email-alerts: %i' % len(arbs_list)
-        # Send e-mail (I should offer custom name for saved search too)
-        if arbs_list:
-            # If arbs exist
-            subject = 'Arb alert for saved search'
-            message = 'Hello %s, \n\n' % prof.user.username
-            for arb in arbs_list:
-                message += '::ARB::\n'
-                message += 'Event name:'+arb.event_name+'\n'
-                message += 'Event datetime:'+arb.event_datetime.strftime('%Y-%m-%d %H:%M')+'\n'
-                message += 'Bet on outcome:'+arb.bet_on+'\n'
-                message += 'Arb value:'+str(arb.custom_arb_value())+' %\n'
-                message += 'Competition:'+unicode(arb.competition)+'\n'
-                message += 'Market type:'+str(arb.market_type)+'\n'
-                message += 'Bookie name:'+str(arb.bookie_name)+'\n'
-                message += 'Bookie odd:'+str(arb.bookie_odd)+'\n'
-                message += 'Exchange name:'+str(arb.exchange_name)+'\n'
-                message += 'Exchange odd (slot1):'+str(arb.exchange_odd1)+'\n'
-                message += 'Exchange liquidity (slot1):'+str(arb.exchange_stake1)+'\n'
-                message += '-'*20+'\n'
-                message += 'Exchange odd (slot2):'+str(arb.exchange_odd2)+'\n'
-                message += 'Exchange liquidity (slot2):'+str(arb.exchange_stake2)+'\n'
-                message += 'Exchange odd (slot3):'+str(arb.exchange_odd3)+'\n'
-                message += 'Exchange liquidity (slot3):'+str(arb.exchange_stake3)+'\n'
-                message += '-'*20
-                message += '\n\n'
-            send_mail(subject, message, sender, recipients)
-            print subject
-            print message
+
+    # Premium members
+    from accounts.models import UserProfile
+    all_profiles = UserProfile.objects.all()
+    prem_profiles = []
+    for prof in all_profiles:
+        if u'Premium' in [group.name for group in prof.user.groups.all()]:
+            if prof.user.is_active:
+                prem_profiles.append(prof)
+
+    # Send emails
+    from email_alerts import filterArbs
+    from django.core.mail import send_mail
+    # sender = 'webmaster@oddsbot.co.uk'
+    sender = 'lee@localhost'
+    for prof in prem_profiles:
+        recipients = ['lee@localhost']  # [prof.user.email]  # ['leehodg@gmail.com']
+        for ss in prof.savedsearches.all():
+            # loop over saved searches for this member
+            # over recently found arbs in pk_list
+            arbs_list = filterArbs(prof.user, savedsearch2querystr(ss), pk_list)
+            print 'Number of arb email-alerts: %i' % len(arbs_list)
+            # Send e-mail (I should offer custom name for saved search too)
+            if arbs_list:
+                # If arbs exist
+                subject = 'Arb alert for saved search'
+                message = 'Hello %s, \n\n' % prof.user.username
+                for arb in arbs_list:
+                    message += '::ARB::\n'
+                    message += 'Event name:'+arb.event_name+'\n'
+                    message += 'Event datetime:'+arb.event_datetime.strftime('%Y-%m-%d %H:%M')+'\n'
+                    message += 'Bet on outcome:'+arb.bet_on+'\n'
+                    message += 'Arb value:'+str(arb.custom_arb_value())+' %\n'
+                    message += 'Competition:'+unicode(arb.competition)+'\n'
+                    message += 'Market type:'+str(arb.market_type)+'\n'
+                    message += 'Bookie name:'+str(arb.bookie_name)+'\n'
+                    message += 'Bookie odd:'+str(arb.bookie_odd)+'\n'
+                    message += 'Exchange name:'+str(arb.exchange_name)+'\n'
+                    message += 'Exchange odd (slot1):'+str(arb.exchange_odd1)+'\n'
+                    message += 'Exchange liquidity (slot1):'+str(arb.exchange_stake1)+'\n'
+                    message += '-'*20+'\n'
+                    message += 'Exchange odd (slot2):'+str(arb.exchange_odd2)+'\n'
+                    message += 'Exchange liquidity (slot2):'+str(arb.exchange_stake2)+'\n'
+                    message += 'Exchange odd (slot3):'+str(arb.exchange_odd3)+'\n'
+                    message += 'Exchange liquidity (slot3):'+str(arb.exchange_stake3)+'\n'
+                    message += '-'*20
+                    message += '\n\n'
+                send_mail(subject, message, sender, recipients)
+                print subject
+                print message
