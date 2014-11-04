@@ -5,7 +5,6 @@ argparse==1.2.1
 characteristic==14.1.0
 colorlog==2.4.0
 cssselect==0.9.1
-django-mongodb-engine==0.5.2
 djangotoolbox==1.6.2
 fuzzywuzzy==0.3.2
 ipython==2.3.0
@@ -19,7 +18,7 @@ python-dateutil==2.2
 pytz==2014.7
 queuelib==1.2.2
 requests==2.4.1
-scrapy-mongodb==0.7.2
+scrapy-mongodb==0.7.3
 selenium==2.40.0
 service-identity==14.0.0
 six==1.8.0

@@ -48,10 +48,10 @@ from Bookies.spiders.Whitebet import WhitebetSpider
 from Bookies.spiders.Williamhill_spider import WilliamhillSpider
 
 # Map spider names to spider class instances
-spiderDict = {'888sport': sport888Spider,
+spiderDict = {'sport888': sport888Spider,
               'Apollobet': ApollobetSpider,
               'Apostasonline': ApostasonlineSpider,
-              '188bet': Bet188Spider,
+              'Bet188': Bet188Spider,
               'Bet3000': Bet3000Spider,
               'Betathome': BetathomeSpider,
               'Betfred': BetfredSpider,
@@ -196,7 +196,7 @@ def processBatch(spiderNames):
     # cont.
     return defer.DeferredList(dlist)
 
-spiderNames = [['888sport', 'Apollobet', 'Apostasonline', '188bet', 'Bet3000'],
+spiderNames = [['sport888', ] # 'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
                # ['Betathome', 'Betfred', 'Betinternet', 'Betsafe', 'Betsson', ],
                # ['Betvictor', 'Betway', 'BGbet', 'Buzzodds', 'Bwin', 'Coral', ]
                # ['Dhoze', 'Doxxbet', 'Fortunawin', 'Gentingbet', 'Interwetten', ]
