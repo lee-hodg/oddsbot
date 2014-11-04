@@ -3,6 +3,7 @@
 from __future__ import division  # nice division
 import difflib  # for string comparison
 import unicodedata  # Normalize unicode by forcing to ascii equiv in compStr
+import argparse
 
 # Django and oddsbot
 from scrapy.conf import settings
@@ -13,6 +14,13 @@ sys.path.append(settings['ODDSBOT_ENV'])
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "oddsbot.settings")
 
 from arb import Arb
+
+# =====================CMDLINE ARG PARSING
+parser = argparse.ArgumentParser(description='Hunt some arbs.')
+parser.add_argument("--books", help="Bookies to search(at least one req)",
+                    nargs="+", metavar=('Bookie1', 'Bookie2'))
+args = parser.parse_args()
+booksGroup = args.books
 
 # ======================LOGGING
 import logging
@@ -213,9 +221,10 @@ def compStr(str1, str2):
 # Odds', 'runners' : [{'runnerName': 'HOME', 'price': 4.5},....]},....]
 # the following assumes that has been done.
 
+log.info('Search books %s' % ', '.join(booksGroup))
 pk_list = []
 # Typically events is smaller than xmarkets so search it outer
-for event in events.find():
+for event in events.find({'bookie': {'$in': booksGroup}}):
     event_marketNames = [eventMarket['marketName'] for eventMarket in event['markets']]
     # Only if events have markets where at least one market in event_marketNames
     xevents_subset = xevents.find({'shortDateTime': event['dateTime'],
@@ -431,10 +440,8 @@ if pk_list:
     # For all premium members, loop over their savedsearches, then e-mail them
     # if any arbs are found in the database matching.
 
-
     from django.utils.http import urlencode
     from django.forms.models import model_to_dict
-
 
     def savedsearch2querystr(ss):
         '''
@@ -451,7 +458,6 @@ if pk_list:
         # Generate URL encoded GET string from dict.
         GETstr = urlencode(mydict)
         return GETstr
-
 
     # Premium members
     from accounts.models import UserProfile

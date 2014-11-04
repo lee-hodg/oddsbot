@@ -33,7 +33,7 @@ take_first = TakeFirst()
 #
 
 
-class BetVictorSpider(Spider):
+class BetvictorSpider(Spider):
     name = "Betvictor"
     allowed_domains = ["betvictor.com"]
 

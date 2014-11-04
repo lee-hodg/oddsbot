@@ -9,21 +9,86 @@ from scrapy.utils.project import get_project_settings
 
 
 # Spiders
+from Bookies.spiders.sport888_spider import sport888Spider
 from Bookies.spiders.Apollobet_spider import ApollobetSpider
+from Bookies.spiders.Apostasonline import ApostasonlineSpider
+from Bookies.spiders.bet188_spider import Bet188Spider
+from Bookies.spiders.Bet3000_spider import Bet3000Spider
+from Bookies.spiders.Betathome import BetathomeSpider
+from Bookies.spiders.Betfred_spider import BetfredSpider
+from Bookies.spiders.Betinternet_spider import BetinternetSpider
+from Bookies.spiders.Betsafe_spider import BetsafeSpider
+from Bookies.spiders.Betsson_spider import BetssonSpider
+from Bookies.spiders.Betvictor_spider import BetvictorSpider
+from Bookies.spiders.Betway_spider import BetwaySpider
 from Bookies.spiders.BGbet_spider import BGbetSpider
 from Bookies.spiders.Buzzodds_spider import BuzzoddsSpider
 from Bookies.spiders.Bwin_spider import BwinSpider
 from Bookies.spiders.Coral_spider import CoralSpider
+from Bookies.spiders.Dhoze_spider import DhozeSpider
+from Bookies.spiders.Doxxbet_spider import DoxxbetSpider
+from Bookies.spiders.Fortunawin_spider import FortunawinSpider
+from Bookies.spiders.Gentingbet_spider import GentingbetSpider
+from Bookies.spiders.Interwetten_spider import InterwettenSpider
+from Bookies.spiders.Ladbrokes_spider import LadbrokesSpider
+from Bookies.spiders.Marathonbet_spider import MarathonbetSpider
+from Bookies.spiders.Nordicbet_spider import NordicbetSpider
+from Bookies.spiders.Oddsring import OddsringSpider
+from Bookies.spiders.OneVice_spider import OneviceSpider
+from Bookies.spiders.Paddypower_spider import PaddypowerSpider
+from Bookies.spiders.Setantabet_spider import SetantabetSpider
+from Bookies.spiders.Skybet_spider import SkybetSpider
+from Bookies.spiders.Sportingbet_spider import SportingbetSpider
+from Bookies.spiders.Sportium_spider import SportiumSpider
+from Bookies.spiders.Stanjames_spider import StanjamesSpider
+from Bookies.spiders.Titanbet_spider import TitanbetSpider
+from Bookies.spiders.Tonybet import TonybetSpider
+from Bookies.spiders.Totesport_spider import TotesportSpider
+from Bookies.spiders.Whitebet import WhitebetSpider
+from Bookies.spiders.Williamhill_spider import WilliamhillSpider
+
 # Map spider names to spider class instances
-spiderDict = {'Apollobet': ApollobetSpider,
+spiderDict = {'888sport': sport888Spider,
+              'Apollobet': ApollobetSpider,
+              'Apostasonline': ApostasonlineSpider,
+              '188bet': Bet188Spider,
+              'Bet3000': Bet3000Spider,
+              'Betathome': BetathomeSpider,
+              'Betfred': BetfredSpider,
+              'Betinternet': BetinternetSpider,
+              'Betsafe': BetsafeSpider,
+              'Betsson': BetssonSpider,
+              'Betvictor': BetvictorSpider,
+              'Betway': BetwaySpider,
               'BGbet': BGbetSpider,
               'Buzzodds': BuzzoddsSpider,
               'Bwin': BwinSpider,
               'Coral': CoralSpider,
+              'Dhoze': DhozeSpider,
+              'Doxxbet': DoxxbetSpider,
+              'Fortunawin': FortunawinSpider,
+              'Gentingbet': GentingbetSpider,
+              'Interwetten': InterwettenSpider,
+              'Ladbrokes': LadbrokesSpider,
+              'Marathonbet': MarathonbetSpider,
+              'Nordicbet': NordicbetSpider,
+              'Oddsring': OddsringSpider,
+              'Onevice': OneviceSpider,
+              'Paddypower': PaddypowerSpider,
+              'Setantabet': SetantabetSpider,
+              'Skybet': SkybetSpider,
+              'Sportingbet': SportingbetSpider,
+              'Sportium': SportiumSpider,
+              'Stanjames': StanjamesSpider,
+              'Titanbet': TitanbetSpider,
+              'Tonybet': TonybetSpider,
+              'Totesport': TotesportSpider,
+              'Whitebet': WhitebetSpider,
+              'Williamhill': WilliamhillSpider,
               }
 
 
-# ======================LOGGING
+# ======================LOGGING (python logging not scrapy logging)
 import logging
 LOG_LEVEL = logging.DEBUG
 LOGFORMAT = "  %(log_color)s%(levelname)-8s%(reset)s | %(log_color)s%(message)s%(reset)s"
@@ -80,9 +145,12 @@ def xrunner():
     # Back to original dir
     os.chdir(orig_dir)
     return (r1, r2, r3)
-# The logging is a real annoyance as although crawler arg can bring
-# back log_count stats we can only start the log once without problems
-# is there an exception_count key instead that could be used with stats mailer.
+
+# The logging is a real annoyance as although crawler arg(crawler=crawler) can bring
+# back `log_count` stats for a given crawler, we can only start the log once
+# without problems.
+# Is there an `exception_count` key instead that could be used with stats
+# mailer? or another way to get something like this functionality back?
 log.start()
 
 
@@ -97,7 +165,7 @@ def setup_crawler(spider, stop=False):
 
     def foo(*a, **kw):
         # The result to be passed to any callbacks to deferred
-        # (we don't use it so True could've been False, None w/e)
+        # (we don't use it, so True could've been False, None w/e)
         d.callback(True)
     settings = get_project_settings()
     crawler = Crawler(settings)
@@ -105,10 +173,10 @@ def setup_crawler(spider, stop=False):
     # Ref to foo otherwise it gets GC'd (garbage collected)
     crawler._tempref = foo
     # foo is the handler for the closed signal from this spider
-    # N.B. dispatch returns spider, and reason to foo.
+    # N.B. dispatch returns spider and reason (e.g. 'finished') to foo.
     crawler.signals.connect(foo, signal=signals.spider_closed)
     crawler.crawl(spider)
-    # N.B log is scrapy log, log2 is python color logger
+    # N.B log is scrapy log. log2 is python color logger
     # The crawler arg is necessary for log_count/{ERROR, DEBUG, INFO..} stats
     # which you will want for stats mailer extension.
     # Starting this each time will cause the big torrade of ESMTP Error
@@ -117,7 +185,7 @@ def setup_crawler(spider, stop=False):
     return d
 
 
-def processBatch(spiderNames, last_batch=False):
+def processBatch(spiderNames):
     dlist = []
     # Setup the spiders for this batch
     for spiderName in spiderNames:
@@ -128,9 +196,13 @@ def processBatch(spiderNames, last_batch=False):
     # cont.
     return defer.DeferredList(dlist)
 
-spiderNames = [['Apollobet', 'BGbet', ],
-               ['Buzzodds', 'Bwin', ],
-               ['Coral', ],
+spiderNames = [['888sport', 'Apollobet', 'Apostasonline', '188bet', 'Bet3000'],
+               # ['Betathome', 'Betfred', 'Betinternet', 'Betsafe', 'Betsson', ],
+               # ['Betvictor', 'Betway', 'BGbet', 'Buzzodds', 'Bwin', 'Coral', ]
+               # ['Dhoze', 'Doxxbet', 'Fortunawin', 'Gentingbet', 'Interwetten', ]
+               # ['Ladbrokes', 'Marathonbet', 'Nordicbet', 'Oddsring', 'OneVice', ]
+               # ['Paddypower', 'Setantabet', 'Skybet', 'Sportingbet', 'Sportium', ]
+               # ['Stanjames', 'Titanbet', 'Tonybet', 'Totesport', 'Whitebet', 'Williamhill', ]
                ]
 
 
@@ -165,7 +237,7 @@ def startSpiders():
         # bookie names along as args to findarbs.py (keeping is good if in
         # future we wanted an xml feed of bookie data say, or some other use,
         # but might also slow down arb search?)
-        res = call(['./findarbs.py', ])
+        res = call(['./findarbs.py',  '--books']+ group)
     reactor.stop()
 
 reactor.callWhenRunning(startSpiders)
