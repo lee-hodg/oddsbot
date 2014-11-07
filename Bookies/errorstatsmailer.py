@@ -35,7 +35,6 @@ class ErrorStatsMailer(StatsMailer):
             # If resp or req count missing set bad resp
             bad_resp_req_ratio = True
 
-
         # Finished for some reason other than 'finished'
         bad_finish = False
         reason = self.stats.get_value('finish_reason')
@@ -43,10 +42,15 @@ class ErrorStatsMailer(StatsMailer):
             bad_finish = True
 
         # Errors
-        ignoreErrorSpiders = []  #['Interwetten', ]  # Books to not email on err
+        ignoreErrorSpiders = []   # ['Interwetten', ]  # Books to not email on err
         any_errors = False
-        if ('log_count/ERROR' in self.stats.get_stats(spider).keys() and
-            spider.name not in ignoreErrorSpiders):
+        # if ('log_count/ERROR' in self.stats.get_stats(spider).keys() and
+        #    spider.name not in ignoreErrorSpiders):
+        # Use spider exceptions as this works also when multiple spiders called
+        # from same script(also only gives uncaught excepotions not errs we
+        # know)
+        if ('spider_exceptions' in self.stats.get_stats(spider).keys() and
+           spider.name not in ignoreErrorSpiders):
             print '[DEBUG] Spider name is: %s' % spider.name
             any_errors = True
 
@@ -60,11 +64,11 @@ class ErrorStatsMailer(StatsMailer):
             mins = (tdelta.total_seconds()/60)
 
             # Get error count
-            num_error = self.stats.get_value('log_count/ERROR', 0)
+            # num_error = self.stats.get_value('spider_exceptions', 0)
 
             # Build subject
-            subject = ('[%s] %s errors for %s spider. Scrape took %.2f mins'
-                       % (reason, num_error, spider.name, mins))
+            subject = ('[%s] errors for %s spider. Scrape took %.2f mins'
+                       % (reason, spider.name, mins))
 
             # Build body
             body = "Vital stats\n\n"

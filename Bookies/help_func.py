@@ -100,7 +100,6 @@ def linkFilter(name, link):
                    'Outrights',
                    'To progress',
                    'Fantasy Matches',
-                   'Matches',
                    'Club specials',
                    'Veikkausliiga Season Bets',
                    'Winner',

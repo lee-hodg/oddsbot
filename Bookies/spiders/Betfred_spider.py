@@ -73,7 +73,7 @@ class BetfredSpider(Spider):
             for market in markets:
                 mname = take_first(market.xpath('name/text()').extract())
                 if linkFilter(self.name, mname):
-                    # cont = raw_input('Ent to cont...')
+                    # stop = raw_input('Ent to cont...')
                     continue
                 mid = take_first(market.xpath('idfwmarketgroup/text()').extract())
                 log.msg('traverseNav making market req for market %s with id %s' % (mname, mid),
@@ -97,7 +97,6 @@ class BetfredSpider(Spider):
         for event in eventSelection:
             l = EventLoader(item=EventItem2(), response=response)
             l.add_value('sport', u'Football')
-            l.add_value('market', u'Match Odds')
             l.add_value('bookie', self.name)
 
             # '2014-03-24T18:00:00'
