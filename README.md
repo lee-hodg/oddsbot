@@ -121,3 +121,5 @@ SELECT test_tab.team1, test_tab.team2, test_tab.bookie_name, xtest_tab.bookie_na
 NB without the compStr func the join is almost instant, with that it slows down somewhat.
 
 The tests showed that finarbs was actually faster for some reason when cmpStr was used in postgres. So I don't think the JOIN is going to help us here.
+
+# Timings and groupings

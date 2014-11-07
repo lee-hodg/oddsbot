@@ -196,7 +196,7 @@ def processBatch(spiderNames):
     # cont.
     return defer.DeferredList(dlist)
 
-spiderNames = [['sport888', ] # 'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
+spiderNames = [['sport888',  'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
                # ['Betathome', 'Betfred', 'Betinternet', 'Betsafe', 'Betsson', ],
                # ['Betvictor', 'Betway', 'BGbet', 'Buzzodds', 'Bwin', 'Coral', ]
                # ['Dhoze', 'Doxxbet', 'Fortunawin', 'Gentingbet', 'Interwetten', ]
