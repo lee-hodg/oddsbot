@@ -4,12 +4,15 @@ from __future__ import division  # nice division
 import difflib  # for string comparison
 import unicodedata  # Normalize unicode by forcing to ascii equiv in compStr
 import argparse
+from smtplib import SMTPException
 
 # Django and oddsbot
 from scrapy.conf import settings
 import sys
 import os
 sys.path.append(settings['ODDSBOT_DIR'])
+# This allows us to use the modules available to oddsbot without installing
+# them in the oddScr env too:
 sys.path.append(settings['ODDSBOT_ENV'])
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "oddsbot.settings")
 
@@ -471,10 +474,10 @@ if pk_list:
     # Send emails
     from email_alerts import filterArbs
     from django.core.mail import send_mail
-    # sender = 'webmaster@oddsbot.co.uk'
-    sender = 'lee@localhost'
+    sender = 'webmaster@oddsbot.co.uk'
+    # sender = 'lee@localhost'
     for prof in prem_profiles:
-        recipients = ['lee@localhost']  # [prof.user.email]  # ['leehodg@gmail.com']
+        recipients = ['leehodg@gmail.com']  # ['lee@localhost']  # [prof.user.email]
         for ss in prof.savedsearches.all():
             # loop over saved searches for this member
             # over recently found arbs in pk_list
@@ -505,6 +508,9 @@ if pk_list:
                     message += 'Exchange liquidity (slot3):'+str(arb.exchange_stake3)+'\n'
                     message += '-'*20
                     message += '\n\n'
-                send_mail(subject, message, sender, recipients)
+                try:
+                    send_mail(subject, message, sender, recipients)
+                except SMTPException as e:
+                    log.errror(e)
                 print subject
                 print message

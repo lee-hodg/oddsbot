@@ -1,6 +1,7 @@
 from __future__ import division  # so 5/2 gives 2.5 like in 3.X
 from scrapy.contrib.loader import ItemLoader
 from scrapy.contrib.loader.processor import TakeFirst, Compose, MapCompose, Identity
+from scrapy import log
 import dateutil.parser
 import datetime
 import re
@@ -44,9 +45,13 @@ def parse_str2date(dt_str, loader_context):
             return date
         else:
             # dateutil takes care of all english dates.
-            return dateutil.parser.parse(dt_str)
+            try:
+                return dateutil.parser.parse(dt_str)
+            except ValueError:
+                # Sometimes we have '22/11' and we need to tell it day first
+                return dateutil.parser.parse(dt_str, dayfirst=True)
     except:
-        print '[ERROR parse_str2date] dt_str: %s .' % dt_str
+        log.msg('[parse_str2date] dt_str: %s .' % dt_str, level=log.ERROR)
         return dateutil.parser.parse('')
 
 
@@ -88,7 +93,7 @@ class StripMarketName(object):
             if marketDic['marketName']:
                 marketDic['marketName'] = marketDic['marketName'].strip()
         except KeyError as e:
-            print '\033[31m\033[7m [ERROR StripMarketName:] %s \033[0m' % e
+            log.msg('[StripMarketName:] %s' % e, level=log.ERROR)
         return marketDic
 
 
@@ -100,10 +105,9 @@ class StripOdds(object):
         try:
             for runner in marketDic['runners']:
                 if runner['price']:
-                    runner['price'] = str(runner['price']).strip()
+                    runner['price'] = unicode(runner['price']).strip()
         except KeyError as e:
-            print '\033[31m\033[7m [ERROR StripOdds:] %s \033[0m' % e
-
+            log.msg('[StripOdds:] %s' % e, level=log.ERROR)
         return marketDic
 
 # class ConvertOdds(object):
@@ -206,12 +210,12 @@ class ConvertOdds(object):
                     try:
                         final = '%.2f' % oList[0]
                     except (ValueError, TypeError) as e:
-                        print '\033[31m\033[7m [ERROR ConvertOdds:] %s \033[0m' % e
+                        log.msg('[ConvertOdds:] %s' % e, level=log.ERROR)
                 elif len(oList) is 2:
                     final = '%.2f' % (1.00 + reduce((lambda x, y: x/y), oList))
                 else:
-                    print ('\033[31m\033[7m [ERROR ConvertOdds:] too many /s:'
-                           'malformed price when convertOdds called \033[0m')
+                    log.msg('[ConvertOdds:] too many /s: malformed price when convertOdds called ',
+                            level=log.ERROR)
             # Update price in place
             runner['price'] = final
 

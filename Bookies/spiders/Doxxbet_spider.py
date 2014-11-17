@@ -83,12 +83,15 @@ class DoxxbetSpider(Spider):
         month = take_first(response.xpath('//div[@class="section first"]/'
                                           'div[@class="date"]/div[@class="cal"]/'
                                           'span[@class="month"]/text()').extract())
-        if day and month:
+
+        if day and month and 'back' not in month:
+            # Weirdly sometimes month appears as 'back'
             dateTime = day+' '+month
         else:
             # Other format, e.g. Saturday
             dateTime = take_first(response.xpath('//div[@class="section first"]/'
                                                  'div[@class="date"]/text()').extract())
+
         l.add_value('dateTime', dateTime)
 
         teams = response.xpath('//div[@id="eventDetailTitle"]/h3/span[@class="name"]/text()').extract()

@@ -103,7 +103,7 @@ class BetssonSpider(Spider):
                           meta={'league': league}, callback=self.parse_Data)
         else:
             log.msg('Filtering (no Match Winner) league: %s' % league)
-            yield []
+            yield None
 
     def parse_Data(self, response):
 
@@ -117,7 +117,7 @@ class BetssonSpider(Spider):
         if jsonData == 'null':
             log.msg('Null response for leauge %s at site: %s' % (league, response.url),
                     level=log.ERROR)
-            return []
+            return None
 
         try:
             jsonEvents = jsonData['scbgg_c'][0]['m_c']
@@ -126,7 +126,7 @@ class BetssonSpider(Spider):
                     '. Is jsonData empty?'
                     % (league['name'].encode('utf-8'), league['id']), level=log.ERROR)
             log.msg(jsonData, level=log.ERROR)
-            return []
+            return None
 
         items = []
         for jsonEvent in jsonEvents:
@@ -167,4 +167,6 @@ class BetssonSpider(Spider):
             # Load item
             items.append(l.load_item())
 
+        if not items:
+            items = None
         return items

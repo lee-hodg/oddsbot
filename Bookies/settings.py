@@ -69,7 +69,7 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIRNAME = PROJECT_ROOT.split(os.sep)[-1]
 LOG_DIR = os.path.join(PROJECT_ROOT, '..', 'logs')
-# LOG_FILE = os.path.join(LOG_DIR,'scrapy_out.log')
+LOG_FILE = os.path.join(LOG_DIR,'scrapy_out.log')
 
 
 EXTENSIONS = {

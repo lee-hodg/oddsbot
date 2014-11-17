@@ -151,7 +151,8 @@ def xrunner():
 # without problems.
 # Is there an `exception_count` key instead that could be used with stats
 # mailer? or another way to get something like this functionality back?
-log.start()
+from scrapy.conf import settings
+log.start(logfile=settings['LOG_FILE'])
 
 
 def setup_crawler(spider, stop=False):
@@ -196,13 +197,16 @@ def processBatch(spiderNames):
     # cont.
     return defer.DeferredList(dlist)
 
-spiderNames = [['sport888',  'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
-               # ['Betathome', 'Betfred', 'Betinternet', 'Betsafe', 'Betsson', ],
-               # ['Betvictor', 'Betway', 'BGbet', 'Buzzodds', 'Bwin', 'Coral', ]
-               # ['Dhoze', 'Doxxbet', 'Fortunawin', 'Gentingbet', 'Interwetten', ]
-               # ['Ladbrokes', 'Marathonbet', 'Nordicbet', 'Oddsring', 'OneVice', ]
-               # ['Paddypower', 'Setantabet', 'Skybet', 'Sportingbet', 'Sportium', ]
-               # ['Stanjames', 'Titanbet', 'Tonybet', 'Totesport', 'Whitebet', 'Williamhill', ]
+spiderNames = [# ['sport888',  'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
+               # ['Betathome',
+               #  ['Betfred', 'Betinternet', 'Betsafe', 'Betsson',
+               # #   'Betvictor',
+               #   'Betway', 'BGbet', 'Buzzodds', 'Bwin', 'Coral', ]
+               # ['Dhoze', 'Doxxbet', 'Fortunawin', 'Gentingbet',
+               #  'Interwetten', 'Ladbrokes', 'Marathonbet', 'Nordicbet', 'Oddsring',
+               #  'Onevice', 'Paddypower', 'Setantabet', 'Skybet', 'Sportingbet',
+               #  'Sportium', ],
+                ['Stanjames', 'Titanbet', 'Tonybet', 'Totesport', 'Whitebet', 'Williamhill', ]
                ]
 
 
@@ -212,7 +216,7 @@ spiderNames = [['sport888',  'Apollobet', 'Apostasonline', 'Bet188', 'Bet3000'],
 def startSpiders():
 
     for group in spiderNames:
-        log.msg('\n\nStarting group: %s\n\n' % (group,))
+        log2.info('\n\nStarting group: %s\n\n' % (group,))
         log2.info('Removing previous events in db for %s' % group)
         events.remove({'bookieName': {'$in': spiderNames}})
         yield processBatch(group)
@@ -220,7 +224,7 @@ def startSpiders():
         # do something else now that the batch is done.
         # ...
         # Scrape exchanges
-        results = xrunner()
+        # results = xrunner()
         log2.info('Hunt for some arbs...')
         # Finally search for some juicy arbs
         # Delete arbs in db for these bookies
@@ -237,7 +241,7 @@ def startSpiders():
         # bookie names along as args to findarbs.py (keeping is good if in
         # future we wanted an xml feed of bookie data say, or some other use,
         # but might also slow down arb search?)
-        res = call(['./findarbs.py',  '--books']+ group)
+        # res = call(['./findarbs.py',  '--books']+ group)
     reactor.stop()
 
 reactor.callWhenRunning(startSpiders)

@@ -116,10 +116,64 @@ data from bookies and exchanges in a relational db given how dirty it can be.
 I get before doing that, a good speed test might be to make a simple db structure for MO markets storing, then write a small
 python script to push all the mongo data relevant into the postgres test db (for bookie and exchange), then try and have it find some arbs and compare the speeds I get out. If it's just as slow forget it, if it is vastly quicker, I might have to think harder.
 
-SELECT test_tab.team1, test_tab.team2, test_tab.bookie_name, xtest_tab.bookie_name FROM test_tab INNER JOIN xtest_tab ON cmpStr(test_tab.team1, xtest_tab.team1) and compStr(test_tab.team2, xtest_tab.team2);
+    SELECT test_tab.team1, test_tab.team2, test_tab.bookie_name, xtest_tab.bookie_name FROM test_tab INNER JOIN xtest_tab ON cmpStr(test_tab.team1, xtest_tab.team1) and compStr(test_tab.team2, xtest_tab.team2);
 
 NB without the compStr func the join is almost instant, with that it slows down somewhat.
 
 The tests showed that finarbs was actually faster for some reason when cmpStr was used in postgres. So I don't think the JOIN is going to help us here.
 
 # Timings and groupings
+i
+## Group 1
+- 888sport: 8m, 301 items, 1 error, no exceptions
+- Apollobet: 12m13s, 686 items, 1 error(downloading link), 19 download exceptions
+- Apostasonline: 13m11s, 945 items, no errors, no exceptions
+- 188bet: 1m34s, 617 items, no errors, no exceptions (on repeat keyerror in parseData for 1x2 when getting home_price mexico primera division)
+- Bet3000: 2m50s, 741 items, 1 error, 1 exc (leagueIds jResp categories key error in parseleagues)
+
+    First group (x and findarbs commented out): 12:09:15-12:22:44 (13m29s), so time is good and around the length of longest individual spider run (Apostasonline)
+    Second test with settings to use logfile. 12:31:17-14:47:10(15m53s).
+
+## Group 2
+- Betathome (seems to take forever, some problem? infinite redirects?)
+- Betfred: 1m35s, 512 items, no errors no exceptions.
+- Betinternet: 7m26, 521 items, 1 error/exc, parseData got None for dateTime so couldn't use find on it.(you could add an if dateTime, but do we want to see these errors?)
+- Betsafe: 11m11s, 775items, no err/exc
+- Betsson: 2m12s, 417 items, no err/exc
+- Betvictor:(looks like js challenge is posing problems again)
+- Betway:1m20s, 613items, no err/exc 
+- BGbet: 7m01s, 52 items,
+- Buzzodds: 6m24s, 390 items, no err/exc
+- Bwin: 10m16s, 583 items, 3 exc (ValueError conv str to float in oList in loaders)
+- Coral: 4m10s, 216 items, no err/exc 
+
+    The whole group 2 (minus betathome and betvic): 8m46s 
+
+## Group 3
+
+- Dhoze: 7m20s, 479 items, 1 exc (TypeError, jsonResp was None and attempted FetchPrematchFullMarketsWithSortOrderJSONPResult key in pre_parse_Data)
+- Doxxbet: 5m21s, 289 items, 37 errors ( [parse_str2date] dt_str: 09 BACK)
+- Fortunawin: 3m22s, 234 items, no err/excs
+- Gentingbet: 2m2s, 116 items, no err/excs (occassionally a mkt does not have prices the ps key is [])
+- Interwetten: 5m, 241 items,  no err/excs
+- Ladbrokes: 1m49s, 271 items, no err/excs
+- Marathonbet: 5m29s, 449 items, no err/excs
+- Nordicbet: 3m1s, 254 items, no err/excs
+- Oddsring: 2m, 127 items, no err/excs
+- Onevice:  39s, 178 items, no err/excs
+- Paddypower: 3m30s, 204 items, no err/excs
+- Setantabet: 1m41s, 271 items, no err/excs
+- Skybet: 3m46s,231 items, no err/excs 
+- Sportingbet: 3m50s, 240 items, no err/excs
+- Sportium: 3m37s, 169 items, no err/excs
+
+    The whole group 3: 20:43-20:49
+
+# Group 4
+
+- Stanjames:
+- Titanbet:
+- Tonybet:
+- Totesport:
+- Whitebet:
+- Williamhill:

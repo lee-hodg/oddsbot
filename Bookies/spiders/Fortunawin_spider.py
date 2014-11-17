@@ -32,7 +32,8 @@ class FortunawinSpider(Spider):
         headers = {'Host': 'www.fortunawin.com',
                    'Referer': response.url}
         for link in league_links:
-            yield Request(link, headers=headers, callback=self.pre_parse_Data)
+            yield Request(link, headers=headers, callback=self.pre_parse_Data,
+                          dont_filter=True)
 
     def pre_parse_Data(self, response):
 
@@ -66,9 +67,22 @@ class FortunawinSpider(Spider):
                                  ]
             eventDic = {'eventName': eventName, 'dateTime': dateTime,
                         'MOdict': MOdict}
+            if moreLink:
+                yield Request(url=base_url+moreLink+'&ajax=1', headers=headers,
+                            meta=eventDic, callback=self.parse_Data)
+            else:
+                # Write the MO market alone
+                l = EventLoader(item=EventItem2(), response=response)
+                l.add_value('sport', u'Football')
+                l.add_value('bookie', self.name)
+                if eventName:
+                    teams = eventName.lower().split('-')
+                    l.add_value('teams', teams)
+                l.add_value('dateTime', dateTime)
+                l.add_value('markets', [MOdict, ])
+                # Load item
+                yield l.load_item()
 
-            yield Request(url=base_url+moreLink+'&ajax=1', headers=headers,
-                          meta=eventDic, callback=self.parse_Data)
 
     def parse_Data(self, response):
 

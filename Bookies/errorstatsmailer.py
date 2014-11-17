@@ -49,8 +49,11 @@ class ErrorStatsMailer(StatsMailer):
         # Use spider exceptions as this works also when multiple spiders called
         # from same script(also only gives uncaught excepotions not errs we
         # know)
-        if ('spider_exceptions' in self.stats.get_stats(spider).keys() and
-           spider.name not in ignoreErrorSpiders):
+        excsCount = 0
+        for key in self.stats.get_stats(spider).keys():
+            if 'spider_exceptions' in key:
+                excsCount += self.stats.get_value(key)
+        if (excsCount and spider.name not in ignoreErrorSpiders):
             print '[DEBUG] Spider name is: %s' % spider.name
             any_errors = True
 
@@ -67,8 +70,8 @@ class ErrorStatsMailer(StatsMailer):
             # num_error = self.stats.get_value('spider_exceptions', 0)
 
             # Build subject
-            subject = ('[%s] errors for %s spider. Scrape took %.2f mins'
-                       % (reason, spider.name, mins))
+            subject = ('[%s] %i execpts for %s spider. Scrape took %.2f mins'
+                       % (reason, excsCount, spider.name, mins))
 
             # Build body
             body = "Vital stats\n\n"

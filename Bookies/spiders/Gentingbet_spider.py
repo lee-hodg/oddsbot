@@ -102,7 +102,18 @@ class GentingbetSpider(Spider):
                     # player to score markets (I think you would need the names
                     # data, i.e. jsonEventsData['names'], then match on ids again
                     continue
-                price = runner['ps'][0]['v']
+                if runner['ps']:
+                    # If non-empty list
+                    price = runner['ps'][0]['v']
+                else:
+                    # empty-list (sometimes ps is just [], not sure why, url
+                    # shows prices for affected mkts, usually mkts are totals or
+                    # handicapped)
+                    price = None
+                    # log.msg('Price list was empty for url: %s' % response.url,
+                    #         level=log.ERROR)
+                    # log.msg('Marketname was %s \n with runner dump: %s' % (marketName, runner),
+                    #         level=log.ERROR)
                 if runnername and price:
                     mdict['runners'].append({'runnerName': runnername, 'price': price})
             allmktdicts.append(mdict)
