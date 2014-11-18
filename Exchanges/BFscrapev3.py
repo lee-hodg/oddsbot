@@ -32,7 +32,6 @@ log.addHandler(stream)
 
 # ======================= HELPER FUNCTIONS
 def breaker(pieceSize, L):  # pieceSize non-zero integer
-
     '''
     Break a list into pieceSize pieces.
     For use when submitting multiple market
@@ -99,12 +98,25 @@ MAX_RES = '1000'  # Number of markets to grab with listMarketCatalogue
 
 appKey = 'oqHPNFV7vwlvKZKx'  # non-delayed
 # appKey = 'HuuyZUoVt9raEOOh'  # delayed
+# try:
+#     username = os.environ.get('betfair_username')
+#     password = os.environ.get('betfair_password')
+# except KeyError:
+#     log.error('Betfair username and password should be set as env vars.')
+#     exit()
 try:
-    username = os.environ.get('betfair_username')
-    password = os.environ.get('betfair_password')
-except KeyError:
-    log.error('Betfair username and password should be set as env vars.')
-    exit()
+    with open('/home/lee/thevault/bf.txt') as f:
+        username, password = f.read().split()
+except IOError:
+    try:
+        # local non-server install
+        username = os.environ.get('betfair_username')
+        password = os.environ.get('betfair_password')
+    except KeyError:
+        log.error('Could not read user, pass from file or env.')
+        exit()
+
+
 payload = 'username=%s&password=%s' % (username, password)
 login_headers = {'X-Application': 'arbOracle', 'Content-Type': 'application/x-www-form-urlencoded'}
 

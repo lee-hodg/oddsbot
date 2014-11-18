@@ -100,7 +100,9 @@ class WhitebetSpider(Spider):
 
         eventName = jsonBody['name']
         if eventName:
-            teams = eventName.lower().split(' v ')
+            teams = eventName.lower().split(' - ')
+            if len(teams) != 2:
+                teams = eventName.lower().split(' v ')
             l.add_value('teams', teams)
 
         # Markets

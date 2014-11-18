@@ -124,7 +124,7 @@ The tests showed that finarbs was actually faster for some reason when cmpStr wa
 
 # Timings and groupings
 i
-## Group 1
+## Group 1 (5)
 - 888sport: 8m, 301 items, 1 error, no exceptions
 - Apollobet: 12m13s, 686 items, 1 error(downloading link), 19 download exceptions
 - Apostasonline: 13m11s, 945 items, no errors, no exceptions
@@ -134,7 +134,7 @@ i
     First group (x and findarbs commented out): 12:09:15-12:22:44 (13m29s), so time is good and around the length of longest individual spider run (Apostasonline)
     Second test with settings to use logfile. 12:31:17-14:47:10(15m53s).
 
-## Group 2
+## Group 2 (11)
 - Betathome (seems to take forever, some problem? infinite redirects?)
 - Betfred: 1m35s, 512 items, no errors no exceptions.
 - Betinternet: 7m26, 521 items, 1 error/exc, parseData got None for dateTime so couldn't use find on it.(you could add an if dateTime, but do we want to see these errors?)
@@ -149,7 +149,7 @@ i
 
     The whole group 2 (minus betathome and betvic): 8m46s 
 
-## Group 3
+## Group 3 (15)
 
 - Dhoze: 7m20s, 479 items, 1 exc (TypeError, jsonResp was None and attempted FetchPrematchFullMarketsWithSortOrderJSONPResult key in pre_parse_Data)
 - Doxxbet: 5m21s, 289 items, 37 errors ( [parse_str2date] dt_str: 09 BACK)
@@ -169,11 +169,67 @@ i
 
     The whole group 3: 20:43-20:49
 
-# Group 4
+# Group 4(6)
 
-- Stanjames:
-- Titanbet:
-- Tonybet:
-- Totesport:
-- Whitebet:
-- Williamhill:
+- Stanjames: 1m27s, 172 items, no err/excs
+- Titanbet: 5m39s, 375 items, no err/excs
+- Tonybet: 2m35s, 195 items, no err/excs
+- Totesport: 3m55s, 309 items, no err/excs
+- Whitebet: 4m5s, 291, no err/excs
+- Williamhill: 1m, 396 items, no err/excs
+
+    The whole group 4: 21:01:54-21:07:36, thus 6m18s  
+
+
+# Let's arrange groups by roughly equal timing
+
+## Need fixing (2)
+- Betvictor:(looks like js challenge is posing problems again)
+- Betathome (seems to take forever, some problem? infinite redirects?)
+
+## Long (7)
+
+- 888sport: 8m, 301 items, 1 error, no exceptions
+- Apollobet: 12m13s, 686 items, 1 error(downloading link), 19 download exceptions
+- Apostasonline: 13m11s, 945 items, no errors, no exceptions
+- Betinternet: 7m26, 521 items, 1 error/exc, parseData got None for dateTime so couldn't use find on it.(you could add an if dateTime, but do we want to see these errors?)
+- Betsafe: 11m11s, 775items, no err/exc
+- Bwin: 10m16s, 583 items, 3 exc (ValueError conv str to float in oList in loaders)
+- Dhoze: 7m20s, 479 items, 1 exc (TypeError, jsonResp was None and attempted FetchPrematchFullMarketsWithSortOrderJSONPResult key in pre_parse_Data)
+
+## Medium(8)
+
+- BGbet: 7m01s, 52 items,
+- Buzzodds: 6m24s, 390 items, no err/exc
+- Coral: 4m10s, 216 items, no err/exc 
+- Doxxbet: 5m21s, 289 items, 37 errors ( [parse_str2date] dt_str: 09 BACK)
+- Interwetten: 5m, 241 items,  no err/excs
+- Marathonbet: 5m29s, 449 items, no err/excs
+- Titanbet: 5m39s, 375 items, no err/excs
+- Whitebet: 4m5s, 291, no err/excs
+
+## Short (12)
+- Bet3000: 2m50s, 741 items, 1 error, 1 exc (leagueIds jResp categories key error in parseleagues)
+- Betsson: 2m12s, 417 items, no err/exc
+- Fortunawin: 3m22s, 234 items, no err/excs
+- Gentingbet: 2m2s, 116 items, no err/excs (occassionally a mkt does not have prices the ps key is [])
+- Nordicbet: 3m1s, 254 items, no err/excs
+- Oddsring: 2m, 127 items, no err/excs
+- Paddypower: 3m30s, 204 items, no err/excs
+- Skybet: 3m46s,231 items, no err/excs 
+- Sportingbet: 3m50s, 240 items, no err/excs
+- Sportium: 3m37s, 169 items, no err/excs
+- Tonybet: 2m35s, 195 items, no err/excs
+- Totesport: 3m55s, 309 items, no err/excs
+
+
+## Super short (8)
+- 188bet: 1m34s, 617 items, no errors, no exceptions (on repeat keyerror in parseData for 1x2 when getting home_price mexico primera division)
+- Betfred: 1m35s, 512 items, no errors no exceptions.
+- Betway:1m20s, 613items, no err/exc 
+- Ladbrokes: 1m49s, 271 items, no err/excs
+- Onevice:  39s, 178 items, no err/excs
+- Setantabet: 1m41s, 271 items, no err/excs
+- Stanjames: 1m27s, 172 items, no err/excs
+- Williamhill: 1m, 396 items, no err/excs
+
