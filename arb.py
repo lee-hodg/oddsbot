@@ -25,7 +25,7 @@ class Arb:
     #
 
     def __init__(self, when, sport, market_type, competition, name,
-                 bet_on, bookie, bookie_price, exchange, mid, exchange_price1,
+                 bet_on, bookie, bookie_price, exchange, mid, mhref, exchange_price1,
                  exchange_stake1, exchange_price2, exchange_stake2,
                  exchange_price3, exchange_stake3):
         self.when = when
@@ -37,7 +37,8 @@ class Arb:
         self.bookie = bookie
         self.bookie_price = bookie_price
         self.exchange = exchange
-        self.mid = mid  # to form link to event on exch
+        self.mid = mid
+        self.mhref = mhref
         self.exchange_price1 = exchange_price1
         self.exchange_stake1 = exchange_stake1
         self.exchange_price2 = exchange_price2
@@ -85,6 +86,7 @@ class Arb:
         output += u'Bookie Odds = %s \n' % self.bookie_price
         output += u'Exchange = %s \n' % self.exchange
         output += u'Market id = %s \n' % self.mid
+        output += u'Market href = %s \n' % self.mhref
         output += u'Exchange Odds1 = %s \n' % self.exchange_price1
         output += u'Exchange Stake1 = %s \n' % self.exchange_stake1
         output += u'Exchange Odds2 = %s \n' % self.exchange_price2
@@ -106,6 +108,7 @@ class Arb:
                             self.bookie_price,
                             self.exchange,
                             self.mid,
+                            self.mhref,
                             self.exchange_price1,
                             self.exchange_stake1,
                             self.exchange_price2,
@@ -118,9 +121,9 @@ class Arb:
             cur = conn.cursor()
             insSQLcmd = "INSERT INTO "
             insSQLcmd += "arbs_tab(event_datetime, sport, market_type, competition, event_name, bet_on, arb_value, "
-            insSQLcmd += "bookie_name, bookie_odd, exchange_name, mid, exchange_odd1, exchange_stake1, "
+            insSQLcmd += "bookie_name, bookie_odd, exchange_name, mid, mhref, exchange_odd1, exchange_stake1, "
             insSQLcmd += "exchange_odd2, exchange_stake2, exchange_odd3, exchange_stake3, found_stamp) "
-            insSQLcmd += "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING Id"
+            insSQLcmd += "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, %s, %s,%s,%s,%s) RETURNING Id"
             try:
                 cur.execute(insSQLcmd, values_to_insert)
             except Exception as e:

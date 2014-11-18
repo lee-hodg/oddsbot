@@ -201,12 +201,12 @@ def processBatch(spiderNames):
 # 'Betathome'
 # 'Betvictor'
 
-spiderNames = [['sport888',  'Apollobet', 'Apostasonline', 'Betinternet',
-                'Betsafe', 'Bwin', 'Dhoze', ],
-               ['BGbet', 'Buzzodds', 'Coral', 'Doxxbet', 'Interwetten',
-                'Marathonbet', 'Titanbet', 'Whitebet', ],
-               ['Bet3000', 'Betsson', 'Fortunawin', 'Gentingbet', 'Nordicbet', 'Oddsring',
-                'Paddypower', 'Skybet', 'Sportingbet', 'Sportium', 'Tonybet', 'Totesport', ],
+spiderNames = [# ['sport888',  'Apollobet', 'Apostasonline', 'Betinternet',
+               #  'Betsafe', 'Bwin', 'Dhoze', ],
+               # ['BGbet', 'Buzzodds', 'Coral', 'Doxxbet', 'Interwetten',
+               #  'Marathonbet', 'Titanbet', 'Whitebet', ],
+               # ['Bet3000', 'Betsson', 'Fortunawin', 'Gentingbet', 'Nordicbet', 'Oddsring',
+               #  'Paddypower', 'Skybet', 'Sportingbet', 'Sportium', 'Tonybet', 'Totesport', ],
                ['Bet188', 'Betfred', 'Betway', 'Ladbrokes', 'Onevice', 'Setantabet',
                 'Stanjames', 'Williamhill', ],
                ]

@@ -90,7 +90,7 @@ with conn:
     initSQLcmd += ("competition TEXT, event_name TEXT, bet_on TEXT,"
                    "arb_value REAL, bookie_name TEXT, bookie_odd REAL,"
                    "exchange_name TEXT,")
-    initSQLcmd += ("mid TEXT, exchange_odd1 REAL, exchange_stake1 REAL,"
+    initSQLcmd += ("mid TEXT, mhref TEXT, exchange_odd1 REAL, exchange_stake1 REAL,"
                    "exchange_odd2 REAL, exchange_stake2 REAL,"
                    "exchange_odd3 REAL, exchange_stake3 REAL, found_stamp TIMESTAMP WITH TIME ZONE)")
     cur.execute(initSQLcmd)
@@ -395,12 +395,28 @@ for event in events.find({'bookie': {'$in': booksGroup}}):
                                                 #        'found_stamp': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M')
                                                 #        }
 
+                                                # Form appropriate market href
+                                                # depending on exch
+                                                mhref = ''
+                                                mid = xmarket['marketId'].replace('@', '.')
+                                                if xevent['exchangeName'] == 'Betfair':
+                                                    mhref = "http://www.betfair.com/exchange/football/market?id=%s" % mid
+                                                elif xevent['exchangeName'] == 'Betdaq':
+                                                    # Not sure how to link
+                                                    # Betdaq
+                                                    mhref = ''
+                                                elif xevent['exchangeName'] == 'Smarkets':
+                                                    # will just grab real url
+                                                    # and store in mongo event
+                                                    # for smarkets
+                                                    mhref = xevent.get('url', '')
                                                 # Create temp_arb
                                                 temp_arb = Arb(when, event['sport'], xmarket['marketName'], comp,
                                                                xevent['eventName'], xrunner['runnerName'],
                                                                event['bookie'],
                                                                bprice, xevent['exchangeName'],
-                                                               xmarket['marketId'].replace('@', '.'),
+                                                               mid,
+                                                               mhref,
                                                                exchange_price1, exchange_size1,
                                                                exchange_price2, exchange_size2,
                                                                exchange_price3, exchange_size3,
@@ -499,6 +515,7 @@ if pk_list:
                     message += 'Bookie name:'+str(arb.bookie_name)+'\n'
                     message += 'Bookie odd:'+str(arb.bookie_odd)+'\n'
                     message += 'Exchange name:'+str(arb.exchange_name)+'\n'
+                    message += 'Exchange link:'+str(arb.mhref)+'\n'
                     message += 'Exchange odd (slot1):'+str(arb.exchange_odd1)+'\n'
                     message += 'Exchange liquidity (slot1):'+str(arb.exchange_stake1)+'\n'
                     message += '-'*20+'\n'
