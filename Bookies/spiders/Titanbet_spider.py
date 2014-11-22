@@ -3,6 +3,7 @@ from Bookies.loaders import EventLoader
 from Bookies.items import EventItem2
 from scrapy.contrib.loader.processor import TakeFirst
 from scrapy import log
+from Bookies.help_func import linkFilter
 from scrapy.http import Request
 take_first = TakeFirst()
 
@@ -20,6 +21,7 @@ class TitanbetSpider(Spider):
                                       'ul[@class="expander-content"]/'
                                       'li[@class="expander expander-collapsed"]/'
                                       'ul[@class="expander-content"]/li/a/@href').extract()
+        league_links = [l for l in league_links if not linkFilter(self.name, l)]
         headers = {'Referer': 'http://sports.titanbet.co.uk/en/football',
                    'Host': 'sports.titanbet.co.uk',
                    }
@@ -71,6 +73,10 @@ class TitanbetSpider(Spider):
             # are ul/li instead of tables).
             runners = mkt.xpath('div[@class="expander-content"]/table/'
                                 'tbody/tr[@class="limited-row"]/td[starts-with(@class, "seln")]')
+            if not runners:
+                # Sometimes tr has no class
+                runners = mkt.xpath('div[@class="expander-content"]/table/'
+                                    'tbody/tr/td[starts-with(@class, "seln")]')
             for runner in runners:
                 runnername = take_first(runner.xpath('.//span[@class="seln-name"]/span/text()').extract())
                 if not runnername:
