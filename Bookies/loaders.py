@@ -1,6 +1,7 @@
 from __future__ import division  # so 5/2 gives 2.5 like in 3.X
 from scrapy.contrib.loader import ItemLoader
 from scrapy.contrib.loader.processor import TakeFirst, Compose, MapCompose, Identity
+from scrapy.exceptions import CloseSpider
 from scrapy import log
 import dateutil.parser
 import datetime
@@ -196,13 +197,17 @@ class ConvertOdds(object):
                     pass
                 print v
 
-            if v is None or v == '' or v == 'none':
+            if v is None or v == '' or v == 'none' or v=='n/a':
                 # 'none' occurs if v = None then str(v.lower())
                 final = '0.0'
             elif v in self.evens_aliases:
                 final = '2.0'
             else:
-                oList = [float(n) for n in v.split('/') if n is not '']
+                try:
+                    oList = [float(n) for n in v.split('/') if n is not '']
+                except ValueError as e:
+                    raise CloseSpider('Exc %s . The value was : %s. MarketName: %s.'
+                                      % (e, v, marketDic['marketName']))
                 if len(oList) is 0:
                     # empty str
                     final = '0.0'
