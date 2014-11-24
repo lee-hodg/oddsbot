@@ -189,6 +189,15 @@ def compStr(str1, str2):
     # Is either simply contained in other? (e.g. man city and man city fc)
     if (str1 in str2) or (str2 in str1):
         return True
+    # If u21 or u18 in one must be in other
+    if 'u21' in str1 and 'u21' not in str2:
+        return False
+    elif 'u21' in str2 and 'u21' not in str1:
+        return False
+    if 'u18' in str1 and 'u18' not in str2:
+        return False
+    elif 'u18' in str2 and 'u18' not in str1:
+        return False
 
     # Resort to similiary testing. Quite unlikely both home/away will fail this.
     critVal = 0.8
