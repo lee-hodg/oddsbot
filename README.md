@@ -1,3 +1,5 @@
+# The backend for the matched betting scraping venture that I learned Django/Scrapy through in early 2014. I discontinued work on this now.
+
 # Installing
 
 ## Make the virtualenv as normal
@@ -232,4 +234,3 @@ i
 - Setantabet: 1m41s, 271 items, no err/excs
 - Stanjames: 1m27s, 172 items, no err/excs
 - Williamhill: 1m, 396 items, no err/excs
-
